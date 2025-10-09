@@ -158,9 +158,9 @@ export default function AgentsPage() {
   };
 
   // Import agents
-  const handleImport = (jsonData: string) => {
+  const handleImport = async (jsonData: string) => {
     try {
-      const imported = importAgents(jsonData);
+      const imported = await importAgents(jsonData);
       toast({
         title: "Import successful",
         description: `Imported ${imported.length} ${imported.length === 1 ? "agent" : "agents"}.`,

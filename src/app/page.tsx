@@ -1,5 +1,5 @@
-import AgentsPage from "./agents/page";
+import ChatPage from './chat/page';
 
 export default function Home() {
-  return <AgentsPage />;
+  return <ChatPage />;
 }

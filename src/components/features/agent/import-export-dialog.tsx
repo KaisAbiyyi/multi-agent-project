@@ -21,7 +21,7 @@ import { Download, Upload, AlertCircle, CheckCircle } from "lucide-react";
 interface ImportExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onImport: (jsonData: string) => void;
+  onImport: (jsonData: string) => Promise<void>;
   exportData?: string;
 }
 
@@ -35,7 +35,7 @@ export function ImportExportDialog({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const handleImport = () => {
+  const handleImport = async () => {
     try {
       setError(null);
       setSuccess(false);
@@ -48,7 +48,7 @@ export function ImportExportDialog({
       // Validate JSON
       JSON.parse(importData);
 
-      onImport(importData);
+      await onImport(importData);
       setSuccess(true);
       setImportData("");
 

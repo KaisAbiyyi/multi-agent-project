@@ -1,173 +1,147 @@
-/**
- * Agent storage service
- * Handles CRUD operations for agents in localStorage
- */
-
-import { Agent } from "@/types";
-import { STORAGE_KEYS } from "@/constants";
+import { db } from '@/lib/db';
+import type { Agent } from '@/types';
 
 /**
- * Get all agents from localStorage
+ * Get all agents from IndexedDB
  */
-export function getAgents(): Agent[] {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEYS.AGENTS);
-    if (!stored) return [];
-    return JSON.parse(stored) as Agent[];
-  } catch (error) {
-    console.error("Error loading agents:", error);
-    return [];
-  }
+export async function getAgents(): Promise<Agent[]> {
+  return await db.agents.orderBy('createdAt').reverse().toArray();
 }
 
 /**
  * Get a single agent by ID
  */
-export function getAgentById(id: string): Agent | null {
-  const agents = getAgents();
-  return agents.find((agent) => agent.id === id) || null;
-}
-
-/**
- * Save agents to localStorage
- */
-function saveAgents(agents: Agent[]): void {
-  try {
-    localStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(agents));
-  } catch (error) {
-    console.error("Error saving agents:", error);
-    throw new Error("Failed to save agents");
-  }
+export async function getAgentById(id: string): Promise<Agent | undefined> {
+  return await db.agents.get(id);
 }
 
 /**
  * Create a new agent
  */
-export function createAgent(agentData: Omit<Agent, "id" | "createdAt" | "updatedAt">): Agent {
-  const agents = getAgents();
-
+export async function createAgent(
+  data: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>
+): Promise<Agent> {
+  const now = new Date().toISOString();
   const newAgent: Agent = {
-    ...agentData,
+    ...data,
     id: crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
   };
 
-  agents.push(newAgent);
-  saveAgents(agents);
-
+  await db.agents.add(newAgent);
   return newAgent;
 }
 
 /**
  * Update an existing agent
  */
-export function updateAgent(id: string, updates: Partial<Omit<Agent, "id" | "createdAt">>): Agent {
-  const agents = getAgents();
-  const index = agents.findIndex((agent) => agent.id === id);
-
-  if (index === -1) {
-    throw new Error(`Agent with id ${id} not found`);
+export async function updateAgent(
+  id: string,
+  updates: Partial<Omit<Agent, 'id' | 'createdAt'>>
+): Promise<Agent | undefined> {
+  const existing = await db.agents.get(id);
+  if (!existing) {
+    throw new Error('Agent not found');
   }
 
-  const updatedAgent: Agent = {
-    ...agents[index]!,
+  const updated: Agent = {
+    ...existing,
     ...updates,
-    id: agents[index]!.id, // Preserve the original ID
-    createdAt: agents[index]!.createdAt, // Preserve creation date
+    id: existing.id,
+    createdAt: existing.createdAt,
     updatedAt: new Date().toISOString(),
   };
 
-  agents[index] = updatedAgent;
-  saveAgents(agents);
-
-  return updatedAgent;
+  await db.agents.update(id, updated);
+  return updated;
 }
 
 /**
  * Delete an agent
  */
-export function deleteAgent(id: string): boolean {
-  const agents = getAgents();
-  const filteredAgents = agents.filter((agent) => agent.id !== id);
-
-  if (filteredAgents.length === agents.length) {
-    return false; // Agent not found
-  }
-
-  saveAgents(filteredAgents);
-  return true;
+export async function deleteAgent(id: string): Promise<void> {
+  await db.agents.delete(id);
 }
 
 /**
  * Duplicate an agent
  */
-export function duplicateAgent(id: string): Agent {
-  const agent = getAgentById(id);
-
+export async function duplicateAgent(id: string): Promise<Agent> {
+  const agent = await db.agents.get(id);
   if (!agent) {
-    throw new Error(`Agent with id ${id} not found`);
+    throw new Error('Agent not found');
   }
 
-  const duplicatedAgent = createAgent({
+  const now = new Date().toISOString();
+  const duplicate: Agent = {
+    ...agent,
+    id: crypto.randomUUID(),
     name: `${agent.name} (Copy)`,
-    description: agent.description,
-    persona: agent.persona,
-    modelId: agent.modelId,
-    apiKeyId: agent.apiKeyId,
-    temperature: agent.temperature,
-    maxTokens: agent.maxTokens,
-  });
+    createdAt: now,
+    updatedAt: now,
+  };
 
-  return duplicatedAgent;
+  await db.agents.add(duplicate);
+  return duplicate;
 }
 
 /**
  * Export agents to JSON
  */
-export function exportAgents(agentIds?: string[]): string {
-  const agents = getAgents();
-  const toExport = agentIds ? agents.filter((agent) => agentIds.includes(agent.id)) : agents;
+export async function exportAgents(agentIds?: string[]): Promise<string> {
+  let agents: Agent[];
+  
+  if (agentIds && agentIds.length > 0) {
+    agents = await Promise.all(
+      agentIds.map(id => db.agents.get(id))
+    ).then(results => results.filter((a): a is Agent => a !== undefined));
+  } else {
+    agents = await db.agents.toArray();
+  }
 
-  return JSON.stringify(toExport, null, 2);
+  return JSON.stringify(agents, null, 2);
 }
 
 /**
  * Import agents from JSON
  */
-export function importAgents(jsonData: string): Agent[] {
+export async function importAgents(jsonData: string): Promise<Agent[]> {
   try {
-    const importedAgents = JSON.parse(jsonData) as Agent[];
-    const currentAgents = getAgents();
+    const data = JSON.parse(jsonData);
+    const agents = Array.isArray(data) ? data : [data];
+    
+    const imported: Agent[] = [];
+    const now = new Date().toISOString();
 
-    // Generate new IDs for imported agents to avoid conflicts
-    const newAgents = importedAgents.map((agent) => ({
-      ...agent,
-      id: crypto.randomUUID(),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }));
+    for (const agentData of agents) {
+      const newAgent: Agent = {
+        ...agentData,
+        id: crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+      };
+      
+      await db.agents.add(newAgent);
+      imported.push(newAgent);
+    }
 
-    const allAgents = [...currentAgents, ...newAgents];
-    saveAgents(allAgents);
-
-    return newAgents;
-  } catch (error) {
-    console.error("Error importing agents:", error);
-    throw new Error("Invalid agent data format");
+    return imported;
+  } catch {
+    throw new Error('Invalid JSON data');
   }
 }
 
 /**
- * Search agents by name or description
+ * Search agents by name, description, or persona
  */
-export function searchAgents(query: string): Agent[] {
-  const agents = getAgents();
-  const lowercaseQuery = query.toLowerCase();
-
-  return agents.filter(
-    (agent) =>
-      agent.name.toLowerCase().includes(lowercaseQuery) ||
-      agent.description?.toLowerCase().includes(lowercaseQuery)
+export async function searchAgents(query: string): Promise<Agent[]> {
+  const lowerQuery = query.toLowerCase();
+  const allAgents = await db.agents.toArray();
+  
+  return allAgents.filter((agent: Agent) => 
+    agent.name.toLowerCase().includes(lowerQuery) ||
+    agent.description?.toLowerCase().includes(lowerQuery) ||
+    agent.persona.toLowerCase().includes(lowerQuery)
   );
 }

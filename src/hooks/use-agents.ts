@@ -1,12 +1,8 @@
-/**
- * Custom React hooks for agent management
- */
+'use client';
 
-"use client";
-
-import { useState, useEffect, useCallback } from "react";
-import { Agent } from "@/types";
-import * as agentStorage from "@/services/storage/agent-storage";
+import { useState, useEffect, useCallback } from 'react';
+import type { Agent } from '@/types';
+import * as agentStorage from '@/services/storage/agent-storage';
 
 /**
  * Hook to manage agents with real-time updates
@@ -17,14 +13,14 @@ export function useAgents() {
   const [error, setError] = useState<string | null>(null);
 
   // Load agents from storage
-  const loadAgents = useCallback(() => {
+  const loadAgents = useCallback(async () => {
     try {
       setIsLoading(true);
-      const loadedAgents = agentStorage.getAgents();
+      const loadedAgents = await agentStorage.getAgents();
       setAgents(loadedAgents);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load agents");
+      setError(err instanceof Error ? err.message : 'Failed to load agents');
     } finally {
       setIsLoading(false);
     }
@@ -36,13 +32,13 @@ export function useAgents() {
   }, [loadAgents]);
 
   // Create a new agent
-  const createAgent = useCallback((agentData: Omit<Agent, "id" | "createdAt" | "updatedAt">) => {
+  const createAgent = useCallback(async (agentData: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
-      const newAgent = agentStorage.createAgent(agentData);
-      setAgents((prev) => [...prev, newAgent]);
+      const newAgent = await agentStorage.createAgent(agentData);
+      setAgents((prev) => [newAgent, ...prev]);
       return newAgent;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to create agent";
+      const errorMessage = err instanceof Error ? err.message : 'Failed to create agent';
       setError(errorMessage);
       throw new Error(errorMessage);
     }
@@ -50,13 +46,15 @@ export function useAgents() {
 
   // Update an existing agent
   const updateAgent = useCallback(
-    (id: string, updates: Partial<Omit<Agent, "id" | "createdAt">>) => {
+    async (id: string, updates: Partial<Omit<Agent, 'id' | 'createdAt'>>) => {
       try {
-        const updatedAgent = agentStorage.updateAgent(id, updates);
-        setAgents((prev) => prev.map((agent) => (agent.id === id ? updatedAgent : agent)));
+        const updatedAgent = await agentStorage.updateAgent(id, updates);
+        if (updatedAgent) {
+          setAgents((prev) => prev.map((agent) => (agent.id === id ? updatedAgent : agent)));
+        }
         return updatedAgent;
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : "Failed to update agent";
+        const errorMessage = err instanceof Error ? err.message : 'Failed to update agent';
         setError(errorMessage);
         throw new Error(errorMessage);
       }
@@ -65,28 +63,26 @@ export function useAgents() {
   );
 
   // Delete an agent
-  const deleteAgent = useCallback((id: string) => {
+  const deleteAgent = useCallback(async (id: string) => {
     try {
-      const success = agentStorage.deleteAgent(id);
-      if (success) {
-        setAgents((prev) => prev.filter((agent) => agent.id !== id));
-      }
-      return success;
+      await agentStorage.deleteAgent(id);
+      setAgents((prev) => prev.filter((agent) => agent.id !== id));
+      return true;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to delete agent";
+      const errorMessage = err instanceof Error ? err.message : 'Failed to delete agent';
       setError(errorMessage);
       throw new Error(errorMessage);
     }
   }, []);
 
   // Duplicate an agent
-  const duplicateAgent = useCallback((id: string) => {
+  const duplicateAgent = useCallback(async (id: string) => {
     try {
-      const duplicated = agentStorage.duplicateAgent(id);
-      setAgents((prev) => [...prev, duplicated]);
+      const duplicated = await agentStorage.duplicateAgent(id);
+      setAgents((prev) => [duplicated, ...prev]);
       return duplicated;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to duplicate agent";
+      const errorMessage = err instanceof Error ? err.message : 'Failed to duplicate agent';
       setError(errorMessage);
       throw new Error(errorMessage);
     }
@@ -94,11 +90,17 @@ export function useAgents() {
 
   // Search agents
   const searchAgents = useCallback(
-    (query: string) => {
+    async (query: string) => {
       if (!query.trim()) {
         return agents;
       }
-      return agentStorage.searchAgents(query);
+
+      try {
+        return await agentStorage.searchAgents(query);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to search agents');
+        return [];
+      }
     },
     [agents]
   );
@@ -121,72 +123,77 @@ export function useAgents() {
  */
 export function useAgent(id: string | null) {
   const [agent, setAgent] = useState<Agent | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) {
       setAgent(null);
-      setIsLoading(false);
       return;
     }
 
-    try {
-      setIsLoading(true);
-      const loadedAgent = agentStorage.getAgentById(id);
-      setAgent(loadedAgent);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load agent");
-    } finally {
-      setIsLoading(false);
-    }
+    const fetchAgent = async () => {
+      try {
+        setIsLoading(true);
+        const foundAgent = await agentStorage.getAgentById(id);
+        setAgent(foundAgent || null);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load agent');
+        setAgent(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAgent();
   }, [id]);
 
   return { agent, isLoading, error };
 }
 
 /**
- * Hook for agent import/export
+ * Hook for agent import/export operations
  */
 export function useAgentImportExport() {
-  const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const exportAgents = useCallback((agentIds?: string[]) => {
+  const exportAgents = useCallback(async (agentIds?: string[]) => {
     try {
       setIsExporting(true);
-      const jsonData = agentStorage.exportAgents(agentIds);
-
-      // Create a download link
-      const blob = new Blob([jsonData], { type: "application/json" });
+      const jsonData = await agentStorage.exportAgents(agentIds);
+      
+      // Create download link
+      const blob = new Blob([jsonData], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
+      const link = document.createElement('a');
       link.href = url;
-      link.download = `aegis-agents-${new Date().toISOString().split("T")[0]}.json`;
+      link.download = `agents-${new Date().toISOString()}.json`;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
       URL.revokeObjectURL(url);
-
+      
       setError(null);
-      return true;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to export agents";
+      const errorMessage = err instanceof Error ? err.message : 'Failed to export agents';
       setError(errorMessage);
-      return false;
+      throw new Error(errorMessage);
     } finally {
       setIsExporting(false);
     }
   }, []);
 
-  const importAgents = useCallback((jsonData: string): Agent[] => {
+  const importAgents = useCallback(async (jsonData: string) => {
     try {
       setIsImporting(true);
-      const importedAgents = agentStorage.importAgents(jsonData);
+      const imported = await agentStorage.importAgents(jsonData);
       setError(null);
-      return importedAgents;
+      return imported;
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "Failed to import agents";
+      const errorMessage = err instanceof Error ? err.message : 'Failed to import agents';
       setError(errorMessage);
       throw new Error(errorMessage);
     } finally {
@@ -195,10 +202,10 @@ export function useAgentImportExport() {
   }, []);
 
   return {
+    isImporting,
+    isExporting,
+    error,
     exportAgents,
     importAgents,
-    isExporting,
-    isImporting,
-    error,
   };
 }
