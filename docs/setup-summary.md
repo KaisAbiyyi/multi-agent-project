@@ -183,17 +183,20 @@ According to `docs/plan.md`, the next feature branches to implement are:
 ## How to Continue
 
 1. Checkout the dev branch:
+
    ```bash
    git checkout dev
    ```
 
 2. Merge the completed setup:
+
    ```bash
    git merge feature/project-setup
    git push
    ```
 
 3. Create the next feature branch:
+
    ```bash
    git checkout -b feature/api-key-management
    ```
