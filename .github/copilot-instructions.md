@@ -3,11 +3,13 @@
 ## Core Principles
 
 ### Always Read Project Documents
+
 - **ALWAYS** read `docs/prd.md` before starting any task to understand the product vision and requirements
 - **ALWAYS** read `docs/plan.md` to check which tasks are pending and which are completed
 - **ALWAYS** verify the current task status before proceeding with work
 
 ### Package Management
+
 - **ALWAYS** use `bun` for all package management and script execution
 - Never use `npm`, `yarn`, or `pnpm`
 - Examples:
@@ -17,6 +19,7 @@
   - Dev server: `bun run dev`
 
 ### UI Component Library (shadcn/ui)
+
 - **shadcn/ui has already been initialized** in this project
 - **ALWAYS** use this exact command format to add shadcn components:
   ```bash
@@ -30,6 +33,7 @@
 - Check shadcn/ui documentation for available components before creating custom ones
 
 ### Task Management
+
 - **ONLY** mark a task as complete (✓) when the **author explicitly approves and confirms** the task is done
 - Never self-mark tasks as complete
 - Always wait for user confirmation before checking off tasks
@@ -38,6 +42,7 @@
 ### Code Architecture (SOLID Principles)
 
 #### Single Responsibility Principle (SRP)
+
 - Each file, function, and component should have **one** clear purpose
 - Separate concerns: UI logic, business logic, data access
 - Example structure:
@@ -51,20 +56,24 @@
   ```
 
 #### Open/Closed Principle (OCP)
+
 - Design components and services to be **open for extension** but **closed for modification**
 - Use composition over inheritance
 - Leverage TypeScript interfaces and generics
 
 #### Liskov Substitution Principle (LSP)
+
 - Derived classes/components should be substitutable for their base classes
 - Maintain consistent interfaces and contracts
 
 #### Interface Segregation Principle (ISP)
+
 - Create focused, specific interfaces
 - Don't force components to depend on interfaces they don't use
 - Split large interfaces into smaller, more specific ones
 
 #### Dependency Inversion Principle (DIP)
+
 - Depend on abstractions, not concretions
 - Use dependency injection where appropriate
 - Create service abstractions for API clients, storage, etc.
@@ -94,6 +103,7 @@ src/
 ```
 
 ### Code Quality Standards
+
 - **TypeScript**: All code must be properly typed, avoid `any`
 - **Naming**: Use descriptive, meaningful names for variables, functions, and components
 - **Comments**: Add JSDoc comments for complex functions and public APIs
@@ -101,18 +111,21 @@ src/
 - **Accessibility**: Ensure all UI components are accessible (ARIA labels, keyboard navigation)
 
 ### Security & Privacy
+
 - **NEVER** send API keys or sensitive data to external servers
 - Store API keys only in localStorage or user-controlled encrypted storage
 - Validate and sanitize all user inputs
 - Handle errors without exposing sensitive information
 
 ### Testing
+
 - Write tests for all business logic in `services/`
 - Test critical user flows
 - Ensure components render correctly
 - Mock external API calls in tests
 
 ### Git Workflow
+
 - Create feature branches following the naming in `docs/plan.md`
 - Write clear, descriptive commit messages
 - Reference task IDs in commits (e.g., "AGENT-001: Implement agent creation form")

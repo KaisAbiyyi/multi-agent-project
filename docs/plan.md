@@ -9,6 +9,7 @@
 ## Development Branches & Tasks
 
 ### Branch: `feature/project-setup`
+
 **Purpose:** Initialize project structure, dependencies, and core configurations
 
 - [ ] **SETUP-001**: Configure Next.js project with TypeScript and Tailwind CSS
@@ -21,6 +22,7 @@
 ---
 
 ### Branch: `feature/api-key-management`
+
 **Purpose:** Implement secure BYOK (Bring Your Own Key) system
 
 - [ ] **KEY-001**: Create API key storage service (localStorage/encrypted)
@@ -35,6 +37,7 @@
 ---
 
 ### Branch: `feature/agent-management`
+
 **Purpose:** Build agent creation, configuration, and management system
 
 - [ ] **AGENT-001**: Design agent data model/schema
@@ -51,6 +54,7 @@
 ---
 
 ### Branch: `feature/council-system`
+
 **Purpose:** Implement the Council system for multi-agent collaboration
 
 - [ ] **COUNCIL-001**: Design Council data model/schema
@@ -66,6 +70,7 @@
 ---
 
 ### Branch: `feature/chat-interface`
+
 **Purpose:** Build the main chat interface for interacting with Councils
 
 - [ ] **CHAT-001**: Design chat UI layout and components
@@ -82,6 +87,7 @@
 ---
 
 ### Branch: `feature/ai-orchestration`
+
 **Purpose:** Core AI orchestration logic and API integration
 
 - [ ] **ORCH-001**: Create API client abstraction layer
@@ -100,6 +106,7 @@
 ---
 
 ### Branch: `feature/history-persistence`
+
 **Purpose:** Implement conversation history and data persistence
 
 - [ ] **HIST-001**: Design conversation history data model
@@ -116,6 +123,7 @@
 ---
 
 ### Branch: `feature/ui-ux-polish`
+
 **Purpose:** Enhance user experience and interface polish
 
 - [ ] **UI-001**: Create onboarding flow for new users
@@ -132,6 +140,7 @@
 ---
 
 ### Branch: `feature/error-handling`
+
 **Purpose:** Robust error handling and user feedback
 
 - [ ] **ERROR-001**: Create global error boundary
@@ -145,6 +154,7 @@
 ---
 
 ### Branch: `feature/testing`
+
 **Purpose:** Comprehensive testing coverage
 
 - [ ] **TEST-001**: Set up testing framework (Jest/Vitest)
@@ -158,6 +168,7 @@
 ---
 
 ### Branch: `feature/documentation`
+
 **Purpose:** User and developer documentation
 
 - [ ] **DOC-001**: Create user guide/manual
@@ -173,21 +184,25 @@
 ## Development Phases
 
 ### Phase 1: Foundation (Weeks 1-2)
+
 - Complete `feature/project-setup`
 - Complete `feature/api-key-management`
 - Start `feature/agent-management`
 
 ### Phase 2: Core Features (Weeks 3-5)
+
 - Complete `feature/agent-management`
 - Complete `feature/council-system`
 - Complete `feature/ai-orchestration`
 
 ### Phase 3: User Interface (Weeks 6-7)
+
 - Complete `feature/chat-interface`
 - Complete `feature/history-persistence`
 - Start `feature/ui-ux-polish`
 
 ### Phase 4: Polish & Launch (Weeks 8-9)
+
 - Complete `feature/ui-ux-polish`
 - Complete `feature/error-handling`
 - Complete `feature/testing`
