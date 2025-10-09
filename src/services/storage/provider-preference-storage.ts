@@ -37,10 +37,13 @@ export async function saveProviderPreference(
   provider: AIProvider,
   apiKeyId?: string
 ): Promise<ProviderPreference> {
+  console.log('[Provider Preference] Saving:', { provider, apiKeyId });
   const now = new Date().toISOString();
   
   // Deactivate all other providers
   const allPrefs = await db.providerPreferences.toArray();
+  console.log('[Provider Preference] Existing preferences:', allPrefs);
+  
   for (const pref of allPrefs) {
     if (pref.provider !== provider) {
       await db.providerPreferences.update(pref.id, { isActive: false });
@@ -49,6 +52,7 @@ export async function saveProviderPreference(
 
   // Check if preference already exists
   const existing = await getProviderPreferenceByProvider(provider);
+  console.log('[Provider Preference] Existing for provider:', existing);
 
   if (existing) {
     // Update existing
@@ -59,6 +63,7 @@ export async function saveProviderPreference(
       updatedAt: now,
     };
     await db.providerPreferences.update(existing.id, updated);
+    console.log('[Provider Preference] Updated:', updated);
     return updated;
   } else {
     // Create new
@@ -71,6 +76,7 @@ export async function saveProviderPreference(
       updatedAt: now,
     };
     await db.providerPreferences.add(newPref);
+    console.log('[Provider Preference] Created new:', newPref);
     return newPref;
   }
 }
