@@ -114,6 +114,34 @@ export interface AppSettings {
   showTokenUsage: boolean;
   defaultTemperature: number;
   defaultMaxTokens: number;
+  // Provider preferences
+  activeProvider: AIProvider;
+  providerConfigs: {
+    ollama: {
+      enabled: boolean;
+    };
+    openrouter: {
+      enabled: boolean;
+      apiKeyId?: string;
+    };
+    llm7: {
+      enabled: boolean;
+      useApiKey: boolean;
+      apiKeyId?: string;
+    };
+  };
+}
+
+/**
+ * Provider preference configuration
+ */
+export interface ProviderPreference {
+  id: string;
+  provider: AIProvider;
+  isActive: boolean;
+  apiKeyId?: string; // Optional for Ollama, required for OpenRouter, optional for LLM7
+  createdAt: string;
+  updatedAt: string;
 }
 
 /**

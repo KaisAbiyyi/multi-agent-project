@@ -3,11 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import type { Agent, AIProvider, AIModel } from '@/types';
+import type { Agent, AIModel } from '@/types';
 import { AgentSchema, type AgentInput } from '@/types/schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
@@ -26,12 +25,13 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Slider } from '@/components/ui/slider';
-import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle, Settings2 } from 'lucide-react';
 import { AI_PROVIDERS } from '@/constants';
 import { fetchModelsByProvider } from '@/services/api/model-service';
 import { useAPIKeys } from '@/hooks/use-api-keys';
+import { useProviderPreference } from '@/hooks/use-provider-preference';
+import { PersonaSelector } from './persona-selector';
 
 interface AgentFormDialogContentProps {
   agent?: Agent;
@@ -45,9 +45,8 @@ export function AgentFormDialogContent({
   isSubmitting = false,
 }: AgentFormDialogContentProps) {
   const { apiKeys } = useAPIKeys();
-  const [selectedProvider, setSelectedProvider] = useState<AIProvider>(
-    agent?.apiKeyId ? getProviderFromApiKey(agent.apiKeyId, apiKeys) : 'ollama'
-  );
+  const { activeProvider, isLoading: isLoadingProvider } = useProviderPreference();
+  
   const [models, setModels] = useState<AIModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
@@ -65,33 +64,29 @@ export function AgentFormDialogContent({
     },
   });
 
-  // Get API key for selected provider
-  const providerRequiresKey = AI_PROVIDERS[selectedProvider]?.requiresAPIKey;
-  const availableApiKeys = apiKeys.filter(
-    (key) => key.provider === selectedProvider && key.isActive
-  );
-
-  // Fetch models when provider changes
+  // Fetch models when component mounts or provider changes
   useEffect(() => {
+    if (!activeProvider) return;
+
     const loadModels = async () => {
       setIsLoadingModels(true);
       setModelError(null);
 
       try {
+        // Get API key for active provider
         let apiKey: string | undefined;
-
-        // For providers that require API key, use the first available one
-        if (providerRequiresKey && availableApiKeys.length > 0 && availableApiKeys[0]) {
-          apiKey = availableApiKeys[0].key;
+        if (activeProvider.apiKeyId) {
+          const key = apiKeys.find((k) => k.id === activeProvider.apiKeyId);
+          apiKey = key?.key;
         }
 
-        const fetchedModels = await fetchModelsByProvider(selectedProvider, apiKey);
+        const fetchedModels = await fetchModelsByProvider(activeProvider.provider, apiKey);
 
         if (fetchedModels.length === 0) {
-          if (selectedProvider === 'ollama') {
+          if (activeProvider.provider === 'ollama') {
             setModelError('Ollama not running. Please start Ollama to see available models.');
-          } else if (providerRequiresKey && availableApiKeys.length === 0) {
-            setModelError(`No API key configured for ${AI_PROVIDERS[selectedProvider].name}`);
+          } else if (AI_PROVIDERS[activeProvider.provider]?.requiresAPIKey && !apiKey) {
+            setModelError(`No API key configured for ${AI_PROVIDERS[activeProvider.provider].name}`);
           } else {
             setModelError('No models available');
           }
@@ -108,28 +103,39 @@ export function AgentFormDialogContent({
     };
 
     loadModels();
-  }, [selectedProvider, providerRequiresKey, availableApiKeys]);
-
-  const handleProviderChange = (provider: AIProvider) => {
-    setSelectedProvider(provider);
-    form.setValue('modelId', '');
     
-    // Auto-select API key if provider requires it
-    if (AI_PROVIDERS[provider]?.requiresAPIKey) {
-      const keys = apiKeys.filter((k) => k.provider === provider && k.isActive);
-      if (keys.length > 0 && keys[0]) {
-        form.setValue('apiKeyId', keys[0].id);
-      } else {
-        form.setValue('apiKeyId', '');
-      }
-    } else {
-      form.setValue('apiKeyId', '');
+    // Set apiKeyId in form if provider has one
+    if (activeProvider.apiKeyId) {
+      form.setValue('apiKeyId', activeProvider.apiKeyId);
     }
-  };
+  }, [activeProvider, apiKeys, form]);
 
   const handleSubmit = (data: AgentInput) => {
     onSubmit(data);
   };
+
+  // Show loading state while provider preference is loading
+  if (isLoadingProvider) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  // Show error if no provider is configured
+  if (!activeProvider) {
+    return (
+      <Alert>
+        <Settings2 className="h-4 w-4" />
+        <AlertDescription>
+          No AI provider configured. Please configure a provider in Settings first.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  const providerConfig = AI_PROVIDERS[activeProvider.provider];
 
   return (
     <Form {...form}>
@@ -179,11 +185,24 @@ export function AgentFormDialogContent({
 
         {/* Persona */}
         <div className="space-y-4">
-          <div>
-            <h3 className="text-lg font-medium">Persona & Instructions</h3>
-            <p className="text-sm text-muted-foreground">
-              Define how your agent should behave and respond
-            </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-medium">Persona & Instructions</h3>
+              <p className="text-sm text-muted-foreground">
+                Define how your agent should behave and respond
+              </p>
+            </div>
+            <PersonaSelector
+              onSelect={(persona, temperature, maxTokens) => {
+                form.setValue('persona', persona);
+                if (temperature !== undefined) {
+                  form.setValue('temperature', temperature);
+                }
+                if (maxTokens !== undefined) {
+                  form.setValue('maxTokens', maxTokens);
+                }
+              }}
+            />
           </div>
 
           <FormField
@@ -208,85 +227,15 @@ export function AgentFormDialogContent({
           />
         </div>
 
-        {/* Provider & Model Configuration */}
+        {/* Model Selection */}
         <div className="space-y-4">
           <div>
-            <h3 className="text-lg font-medium">Model Configuration</h3>
+            <h3 className="text-lg font-medium">Model Selection</h3>
             <p className="text-sm text-muted-foreground">
-              Select the AI provider and model for this agent
+              Using {providerConfig.name} provider
             </p>
           </div>
 
-          {/* Provider Selection */}
-          <div className="space-y-2">
-            <Label>Provider</Label>
-            <Select
-              value={selectedProvider}
-              onValueChange={(value) => handleProviderChange(value as AIProvider)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(AI_PROVIDERS).map(([key, config]) => (
-                  <SelectItem key={key} value={key}>
-                    <div className="flex items-center gap-2">
-                      {config.name}
-                      {config.isLocal && (
-                        <Badge variant="outline" className="text-xs">
-                          Local
-                        </Badge>
-                      )}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {selectedProvider === 'ollama' && (
-              <p className="text-xs text-muted-foreground">
-                ℹ️ Ollama runs locally on your machine. No API key required.
-              </p>
-            )}
-          </div>
-
-          {/* API Key Selection (only if required) */}
-          {providerRequiresKey && (
-            <FormField
-              control={form.control}
-              name="apiKeyId"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>API Key</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select API key" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      {availableApiKeys.length === 0 ? (
-                        <div className="p-2 text-sm text-muted-foreground">
-                          No API keys configured for {AI_PROVIDERS[selectedProvider].name}
-                        </div>
-                      ) : (
-                        availableApiKeys.map((key) => (
-                          <SelectItem key={key.id} value={key.id}>
-                            {key.name}
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>
-                    Configure API keys in Settings if none are available
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          )}
-
-          {/* Model Selection */}
           <FormField
             control={form.control}
             name="modelId"
@@ -333,6 +282,9 @@ export function AgentFormDialogContent({
                     <AlertDescription>{modelError}</AlertDescription>
                   </Alert>
                 )}
+                <FormDescription>
+                  Change provider in Settings to see different models
+                </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
@@ -409,10 +361,4 @@ export function AgentFormDialogContent({
       </form>
     </Form>
   );
-}
-
-// Helper function to get provider from API key ID
-function getProviderFromApiKey(apiKeyId: string, apiKeys: { id: string; provider: AIProvider }[]): AIProvider {
-  const key = apiKeys.find((k) => k.id === apiKeyId);
-  return key?.provider || 'ollama';
 }

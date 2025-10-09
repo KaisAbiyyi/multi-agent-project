@@ -1,5 +1,5 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { Agent, APIKey, Council, Conversation, Message } from '@/types';
+import type { Agent, APIKey, Council, Conversation, Message, ProviderPreference } from '@/types';
 
 // Define the database schema
 class AegisDatabase extends Dexie {
@@ -8,6 +8,7 @@ class AegisDatabase extends Dexie {
   councils!: EntityTable<Council, 'id'>;
   conversations!: EntityTable<Conversation, 'id'>;
   messages!: EntityTable<Message, 'id'>;
+  providerPreferences!: EntityTable<ProviderPreference, 'id'>;
 
   constructor() {
     super('AegisDB');
@@ -18,6 +19,7 @@ class AegisDatabase extends Dexie {
       councils: 'id, name, createdAt, updatedAt',
       conversations: 'id, councilId, createdAt, updatedAt',
       messages: 'id, conversationId, role, createdAt',
+      providerPreferences: 'id, provider, isActive, createdAt, updatedAt',
     });
   }
 }
