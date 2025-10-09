@@ -12,12 +12,12 @@
 
 **Purpose:** Initialize project structure, dependencies, and core configurations
 
-- [ ] **SETUP-001**: Configure Next.js project with TypeScript and Tailwind CSS
-- [ ] **SETUP-002**: Set up ESLint and Prettier configurations
-- [ ] **SETUP-003**: Initialize shadcn/ui component library
-- [ ] **SETUP-004**: Create folder structure following SOLID principles
-- [ ] **SETUP-005**: Set up environment variables template (.env.example)
-- [ ] **SETUP-006**: Configure database schema (if using Supabase/SQLite)
+- [x] **SETUP-001**: Configure Next.js project with TypeScript and Tailwind CSS
+- [x] **SETUP-002**: Set up ESLint and Prettier configurations
+- [x] **SETUP-003**: Initialize shadcn/ui component library
+- [x] **SETUP-004**: Create folder structure following SOLID principles
+- [x] **SETUP-005**: Set up environment variables template (.env.example)
+- [x] **SETUP-006**: Configure database schema (if using Supabase/SQLite)
 
 ---
 
