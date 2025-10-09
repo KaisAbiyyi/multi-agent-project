@@ -26,7 +26,7 @@ import {
 } from '@/components/ui/form';
 import { Slider } from '@/components/ui/slider';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle, Settings2 } from 'lucide-react';
+import { Loader2, AlertCircle, Settings2, Trash2 } from 'lucide-react';
 import { AI_PROVIDERS } from '@/constants';
 import { fetchModelsByProvider } from '@/services/api/model-service';
 import { useAPIKeys } from '@/hooks/use-api-keys';
@@ -36,12 +36,14 @@ import { PersonaSelector } from './persona-selector';
 interface AgentFormDialogContentProps {
   agent?: Agent;
   onSubmit: (data: AgentInput) => void;
+  onDelete?: () => void;
   isSubmitting?: boolean;
 }
 
 export function AgentFormDialogContent({
   agent,
   onSubmit,
+  onDelete,
   isSubmitting = false,
 }: AgentFormDialogContentProps) {
   const { apiKeys } = useAPIKeys();
@@ -50,6 +52,7 @@ export function AgentFormDialogContent({
   const [models, setModels] = useState<AIModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
+  const [modelMismatchWarning, setModelMismatchWarning] = useState<string | null>(null);
 
   const form = useForm<AgentInput>({
     resolver: zodResolver(AgentSchema.omit({ id: true, createdAt: true, updatedAt: true })),
@@ -109,7 +112,19 @@ export function AgentFormDialogContent({
     if (activeProvider.apiKeyId) {
       form.setValue('apiKeyId', activeProvider.apiKeyId);
     }
-  }, [activeProvider, apiKeys, form]);
+
+    // Check if agent's model matches current provider
+    if (agent && agent.modelId) {
+      const agentModel = models.find(m => m.id === agent.modelId);
+      if (!agentModel && models.length > 0) {
+        setModelMismatchWarning(
+          `Warning: "${agent.modelId}" is not available in ${AI_PROVIDERS[activeProvider.provider].name}. Please select a new model.`
+        );
+      } else {
+        setModelMismatchWarning(null);
+      }
+    }
+  }, [activeProvider, apiKeys, form, agent, models]);
 
   const handleSubmit = (data: AgentInput) => {
     onSubmit(data);
@@ -283,6 +298,14 @@ export function AgentFormDialogContent({
                     <AlertDescription>{modelError}</AlertDescription>
                   </Alert>
                 )}
+                {modelMismatchWarning && (
+                  <Alert variant="default" className="border-orange-500 bg-orange-50 dark:bg-orange-950">
+                    <AlertCircle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <AlertDescription className="text-orange-900 dark:text-orange-200">
+                      {modelMismatchWarning}
+                    </AlertDescription>
+                  </Alert>
+                )}
                 <FormDescription>
                   Change provider in Settings to see different models
                 </FormDescription>
@@ -352,8 +375,20 @@ export function AgentFormDialogContent({
           />
         </div>
 
-        {/* Submit Button */}
-        <div className="flex justify-end gap-2 pt-4 border-t">
+        {/* Submit and Delete Buttons */}
+        <div className="flex justify-between gap-2 pt-4 border-t">
+          {agent && onDelete && (
+            <Button 
+              type="button"
+              variant="destructive"
+              onClick={onDelete}
+              disabled={isSubmitting}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete Agent
+            </Button>
+          )}
+          <div className="flex-1" />
           <Button type="submit" disabled={isSubmitting}>
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {agent ? 'Update Agent' : 'Create Agent'}

@@ -33,11 +33,12 @@ import { AgentFormDialogContent } from '@/components/features/agent/agent-form-d
 import { useToast } from '@/hooks/use-toast';
 
 export default function ChatPage() {
-  const { agents, createAgent } = useAgents();
+  const { agents, createAgent, updateAgent, deleteAgent } = useAgents();
   const { toast } = useToast();
   
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isAgentDialogOpen, setIsAgentDialogOpen] = useState(false);
+  const [editingAgent, setEditingAgent] = useState<typeof agents[0] | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeAgentId, setActiveAgentId] = useState<string | null>(
     agents.length > 0 && agents[0] ? agents[0].id : null
@@ -59,6 +60,7 @@ export default function ChatPage() {
       });
       
       setIsAgentDialogOpen(false);
+      setEditingAgent(null);
       
       // Set new agent as active
       setActiveAgentId(newAgent.id);
@@ -73,6 +75,73 @@ export default function ChatPage() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleUpdateAgent = async (data: AgentInput) => {
+    if (!editingAgent) return;
+    
+    console.log('[Chat Page] handleUpdateAgent called with:', data);
+    
+    try {
+      setIsSubmitting(true);
+      
+      await updateAgent(editingAgent.id, data);
+      console.log('[Chat Page] Agent updated successfully');
+      
+      toast({
+        title: 'Agent updated',
+        description: `${data.name} has been updated successfully.`,
+      });
+      
+      setIsAgentDialogOpen(false);
+      setEditingAgent(null);
+    } catch (err) {
+      console.error('[Chat Page] Error updating agent:', err);
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to update agent',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteAgent = async () => {
+    if (!editingAgent) return;
+    
+    try {
+      await deleteAgent(editingAgent.id);
+      
+      toast({
+        title: 'Agent deleted',
+        description: `${editingAgent.name} has been deleted.`,
+      });
+      
+      setIsAgentDialogOpen(false);
+      setEditingAgent(null);
+      
+      // Clear active agent if it was deleted
+      if (activeAgentId === editingAgent.id) {
+        setActiveAgentId(agents[0]?.id || null);
+      }
+    } catch (err) {
+      toast({
+        title: 'Error',
+        description: err instanceof Error ? err.message : 'Failed to delete agent',
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleOpenEditAgent = (agent: typeof agents[0]) => {
+    setEditingAgent(agent);
+    setIsAgentDialogOpen(true);
+  };
+
+  const handleCloseAgentDialog = () => {
+    setIsAgentDialogOpen(false);
+    setEditingAgent(null);
   };
 
   return (
@@ -149,7 +218,12 @@ export default function ChatPage() {
                   <div className="flex items-center">
                     <TabsList className="h-12">
                       {agents.map((agent) => (
-                        <TabsTrigger key={agent.id} value={agent.id} className="gap-2">
+                        <TabsTrigger 
+                          key={agent.id} 
+                          value={agent.id} 
+                          className="gap-2"
+                          onDoubleClick={() => handleOpenEditAgent(agent)}
+                        >
                           <Bot className="h-3 w-3" />
                           {agent.name}
                         </TabsTrigger>
@@ -159,7 +233,10 @@ export default function ChatPage() {
                       variant="ghost"
                       size="sm"
                       className="ml-2"
-                      onClick={() => setIsAgentDialogOpen(true)}
+                      onClick={() => {
+                        setEditingAgent(null);
+                        setIsAgentDialogOpen(true);
+                      }}
                     >
                       <Plus className="h-4 w-4" />
                     </Button>
@@ -215,16 +292,23 @@ export default function ChatPage() {
       {/* Settings Dialog */}
       <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
 
-      {/* Create Agent Dialog */}
-      <Dialog open={isAgentDialogOpen} onOpenChange={setIsAgentDialogOpen}>
+      {/* Create/Edit Agent Dialog */}
+      <Dialog open={isAgentDialogOpen} onOpenChange={handleCloseAgentDialog}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Create New Agent</DialogTitle>
+            <DialogTitle>{editingAgent ? 'Edit Agent' : 'Create New Agent'}</DialogTitle>
             <DialogDescription>
-              Configure a new AI agent with your preferred provider and model
+              {editingAgent 
+                ? 'Update your agent configuration or delete it'
+                : 'Configure a new AI agent with your preferred provider and model'}
             </DialogDescription>
           </DialogHeader>
-          <AgentFormDialogContent onSubmit={handleCreateAgent} isSubmitting={isSubmitting} />
+          <AgentFormDialogContent 
+            agent={editingAgent || undefined}
+            onSubmit={editingAgent ? handleUpdateAgent : handleCreateAgent} 
+            onDelete={editingAgent ? handleDeleteAgent : undefined}
+            isSubmitting={isSubmitting} 
+          />
         </DialogContent>
       </Dialog>
     </SidebarProvider>
