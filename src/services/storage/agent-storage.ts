@@ -21,6 +21,8 @@ export async function getAgentById(id: string): Promise<Agent | undefined> {
 export async function createAgent(
   data: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>
 ): Promise<Agent> {
+  console.log('[Agent Storage] Creating agent with data:', data);
+  
   const now = new Date().toISOString();
   const newAgent: Agent = {
     ...data,
@@ -29,8 +31,16 @@ export async function createAgent(
     updatedAt: now,
   };
 
-  await db.agents.add(newAgent);
-  return newAgent;
+  console.log('[Agent Storage] New agent object:', newAgent);
+  
+  try {
+    await db.agents.add(newAgent);
+    console.log('[Agent Storage] Agent added to database successfully');
+    return newAgent;
+  } catch (error) {
+    console.error('[Agent Storage] Error adding agent to database:', error);
+    throw error;
+  }
 }
 
 /**

@@ -33,12 +33,22 @@ export function useAgents() {
 
   // Create a new agent
   const createAgent = useCallback(async (agentData: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>) => {
+    console.log('[useAgents] Creating agent with data:', agentData);
+    
     try {
       const newAgent = await agentStorage.createAgent(agentData);
-      setAgents((prev) => [newAgent, ...prev]);
+      console.log('[useAgents] Agent created successfully:', newAgent);
+      
+      setAgents((prev) => {
+        const updated = [newAgent, ...prev];
+        console.log('[useAgents] Updated agents list:', updated);
+        return updated;
+      });
+      
       return newAgent;
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to create agent';
+      console.error('[useAgents] Error creating agent:', err);
       setError(errorMessage);
       throw new Error(errorMessage);
     }

@@ -58,7 +58,7 @@ export function AgentFormDialogContent({
       description: '',
       persona: '',
       modelId: '',
-      apiKeyId: '',
+      apiKeyId: undefined, // Optional - not all providers need API key
       temperature: 0.7,
       maxTokens: 2000,
     },
@@ -85,8 +85,9 @@ export function AgentFormDialogContent({
         if (fetchedModels.length === 0) {
           if (activeProvider.provider === 'ollama') {
             setModelError('Ollama not running. Please start Ollama to see available models.');
-          } else if (AI_PROVIDERS[activeProvider.provider]?.requiresAPIKey && !apiKey) {
-            setModelError(`No API key configured for ${AI_PROVIDERS[activeProvider.provider].name}`);
+          } else if (!apiKey && AI_PROVIDERS[activeProvider.provider]?.requiresAPIKey) {
+            // Only show error if API key is REQUIRED but not provided
+            setModelError(`API key required for ${AI_PROVIDERS[activeProvider.provider].name}`);
           } else {
             setModelError('No models available');
           }

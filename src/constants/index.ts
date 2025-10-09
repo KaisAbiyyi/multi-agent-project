@@ -34,7 +34,7 @@ export const AI_PROVIDERS: Record<
   llm7: {
     name: "LLM7",
     baseURL: "https://api.llm7.io/v1",
-    requiresAPIKey: true,
+    requiresAPIKey: false, // API key is optional for LLM7
     supportsStreaming: true,
     isLocal: false,
   },

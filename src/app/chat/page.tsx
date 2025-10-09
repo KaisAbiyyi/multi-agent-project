@@ -44,9 +44,14 @@ export default function ChatPage() {
   );
 
   const handleCreateAgent = async (data: AgentInput) => {
+    console.log('[Chat Page] handleCreateAgent called with:', data);
+    
     try {
       setIsSubmitting(true);
+      console.log('[Chat Page] Calling createAgent...');
+      
       const newAgent = await createAgent(data);
+      console.log('[Chat Page] Agent created successfully:', newAgent);
       
       toast({
         title: 'Agent created',
@@ -57,7 +62,9 @@ export default function ChatPage() {
       
       // Set new agent as active
       setActiveAgentId(newAgent.id);
+      console.log('[Chat Page] Active agent set to:', newAgent.id);
     } catch (err) {
+      console.error('[Chat Page] Error creating agent:', err);
       toast({
         title: 'Error',
         description: err instanceof Error ? err.message : 'Failed to create agent',

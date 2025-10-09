@@ -69,7 +69,7 @@ export const AgentSchema = z.object({
     .min(10, "Persona must be at least 10 characters")
     .max(5000, "Persona is too long"),
   modelId: z.string().min(1, "Model is required"),
-  apiKeyId: z.string().min(1, "API key is required"),
+  apiKeyId: z.string().optional(), // API key is optional (e.g., Ollama doesn't need it, LLM7 is optional)
   temperature: z.number().min(0).max(2).default(0.7).optional(),
   maxTokens: z.number().int().positive().max(128000).default(2048).optional(),
   createdAt: z.string().datetime(),

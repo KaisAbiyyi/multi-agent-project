@@ -46,7 +46,7 @@ export interface Agent {
   description?: string;
   persona: string; // System prompt/instructions
   modelId: string; // Reference to AIModel
-  apiKeyId: string; // Reference to APIKey
+  apiKeyId?: string; // Reference to APIKey (optional - e.g., Ollama doesn't need it, LLM7 is optional)
   temperature?: number;
   maxTokens?: number;
   createdAt: string;
