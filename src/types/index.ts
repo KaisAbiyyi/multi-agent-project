@@ -71,6 +71,7 @@ export interface Council {
  */
 export interface Message {
   id: string;
+  conversationId?: string; // Reference to conversation
   role: "user" | "assistant" | "system";
   content: string;
   agentId?: string; // If from a specific agent
