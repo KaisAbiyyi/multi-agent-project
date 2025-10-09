@@ -37,7 +37,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Plus, Trash2, Edit, Check, X, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-const AI_PROVIDER_OPTIONS: AIProvider[] = ['openai', 'openrouter', 'groq', 'ollama', 'anthropic'];
+const AI_PROVIDER_OPTIONS: AIProvider[] = ['ollama', 'openrouter', 'llm7'];
 
 export function APIKeyManagement() {
   const { apiKeys, isLoading, error, createAPIKey, updateAPIKey, deleteAPIKey } = useAPIKeys();

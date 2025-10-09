@@ -14,37 +14,29 @@ export const AI_PROVIDERS: Record<
     baseURL: string;
     requiresAPIKey: boolean;
     supportsStreaming: boolean;
+    isLocal: boolean;
   }
 > = {
-  openai: {
-    name: "OpenAI",
-    baseURL: "https://api.openai.com/v1",
-    requiresAPIKey: true,
+  ollama: {
+    name: "Ollama (Local)",
+    baseURL: "http://localhost:11434/v1",
+    requiresAPIKey: false,
     supportsStreaming: true,
+    isLocal: true,
   },
   openrouter: {
     name: "OpenRouter",
     baseURL: "https://openrouter.ai/api/v1",
     requiresAPIKey: true,
     supportsStreaming: true,
+    isLocal: false,
   },
-  groq: {
-    name: "Groq",
-    baseURL: "https://api.groq.com/openai/v1",
+  llm7: {
+    name: "LLM7",
+    baseURL: "https://api.llm7.io/v1",
     requiresAPIKey: true,
     supportsStreaming: true,
-  },
-  ollama: {
-    name: "Ollama (Local)",
-    baseURL: "http://localhost:11434/v1",
-    requiresAPIKey: false,
-    supportsStreaming: true,
-  },
-  anthropic: {
-    name: "Anthropic",
-    baseURL: "https://api.anthropic.com/v1",
-    requiresAPIKey: true,
-    supportsStreaming: true,
+    isLocal: false,
   },
 };
 

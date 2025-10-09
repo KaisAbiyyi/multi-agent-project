@@ -6,7 +6,7 @@
 /**
  * Supported AI Provider types
  */
-export type AIProvider = "openai" | "openrouter" | "groq" | "ollama" | "anthropic";
+export type AIProvider = "ollama" | "openrouter" | "llm7";
 
 /**
  * API Key configuration
