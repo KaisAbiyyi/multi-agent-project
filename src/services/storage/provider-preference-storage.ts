@@ -5,10 +5,11 @@ import type { ProviderPreference, AIProvider } from '@/types';
  * Get active provider preference
  */
 export async function getActiveProviderPreference(): Promise<ProviderPreference | undefined> {
-  return await db.providerPreferences
-    .where('isActive')
-    .equals(1)
-    .first();
+  console.log('[Provider Storage] Getting active provider...');
+  const all = await db.providerPreferences.toArray();
+  const active = all.find(pref => pref.isActive === true);
+  console.log('[Provider Storage] Active provider found:', active);
+  return active;
 }
 
 /**

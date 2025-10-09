@@ -5,7 +5,7 @@ import { useAgents } from '@/hooks/use-agents';
 import type { AgentInput } from '@/types/schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Settings, Plus, Bot } from 'lucide-react';
+import { Settings, Plus, Bot, MessageSquare, History } from 'lucide-react';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -14,10 +14,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+} from '@/components/ui/sidebar';
 import { SettingsDialog } from '@/components/features/settings/settings-dialog';
 import { AgentFormDialogContent } from '@/components/features/agent/agent-form-dialog-content';
 import { useToast } from '@/hooks/use-toast';
-import { ScrollArea } from '@/components/ui/scroll-area';
 
 export default function ChatPage() {
   const { agents, createAgent } = useAgents();
@@ -56,53 +69,62 @@ export default function ChatPage() {
   };
 
   return (
-    <>
-      <div className="flex h-screen overflow-hidden">
-        {/* Left Sidebar */}
-        <div className="w-64 border-r flex flex-col bg-muted/10">
-          {/* New Chat Button */}
-          <div className="p-4">
-            <Button className="w-full" size="lg">
-              New Chat
-            </Button>
-          </div>
-
-          {/* Chat History */}
-          <ScrollArea className="flex-1 px-4">
-            <div className="mb-2 text-sm font-medium text-muted-foreground">Chat History</div>
-            <div className="space-y-2">
-              <Button variant="ghost" className="w-full justify-start">
-                Past Chats
-              </Button>
-              <Button variant="ghost" className="w-full justify-start">
-                Past Chats
+    <SidebarProvider>
+      <div className="flex h-screen w-full overflow-hidden">
+        {/* Sidebar */}
+        <Sidebar>
+          <SidebarHeader>
+            <div className="px-2 py-2">
+              <Button className="w-full" size="lg">
+                <MessageSquare className="mr-2 h-4 w-4" />
+                New Chat
               </Button>
             </div>
-          </ScrollArea>
+          </SidebarHeader>
+          
+          <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupLabel className="flex items-center gap-2">
+                <History className="h-4 w-4" />
+                Chat History
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton>
+                      <MessageSquare className="h-4 w-4" />
+                      <span>Past Conversations</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </SidebarContent>
+          
+          <SidebarFooter>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton onClick={() => setIsSettingsOpen(true)}>
+                  <Settings className="h-4 w-4" />
+                  <span>Settings</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarFooter>
+        </Sidebar>
 
-          {/* Settings Button */}
-          <div className="p-4 border-t">
-            <Button
-              variant="outline"
-              className="w-full"
-              size="lg"
-              onClick={() => setIsSettingsOpen(true)}
-            >
-              <Settings className="mr-2 h-4 w-4" />
-              Settings
-            </Button>
-          </div>
-        </div>
-
-        {/* Main Chat Area */}
-        <div className="flex-1 flex flex-col">
-          {/* Agent Tabs */}
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Header with Agent Tabs */}
           <div className="border-b bg-background">
             {agents.length === 0 ? (
               <div className="flex items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Bot className="h-4 w-4" />
-                  <span className="text-sm">No agents configured</span>
+                <div className="flex items-center gap-2">
+                  <SidebarTrigger />
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Bot className="h-4 w-4" />
+                    <span className="text-sm">No agents configured</span>
+                  </div>
                 </div>
                 <Button
                   variant="default"
@@ -114,26 +136,29 @@ export default function ChatPage() {
                 </Button>
               </div>
             ) : (
-              <Tabs value={activeAgentId || undefined} onValueChange={setActiveAgentId} className="w-full">
-                <div className="flex items-center px-4">
-                  <TabsList className="h-12">
-                    {agents.map((agent) => (
-                      <TabsTrigger key={agent.id} value={agent.id} className="gap-2">
-                        <Bot className="h-3 w-3" />
-                        {agent.name}
-                      </TabsTrigger>
-                    ))}
-                  </TabsList>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-2"
-                    onClick={() => setIsAgentDialogOpen(true)}
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
-                </div>
-              </Tabs>
+              <div className="flex items-center px-4">
+                <SidebarTrigger className="mr-2" />
+                <Tabs value={activeAgentId || undefined} onValueChange={setActiveAgentId} className="flex-1">
+                  <div className="flex items-center">
+                    <TabsList className="h-12">
+                      {agents.map((agent) => (
+                        <TabsTrigger key={agent.id} value={agent.id} className="gap-2">
+                          <Bot className="h-3 w-3" />
+                          {agent.name}
+                        </TabsTrigger>
+                      ))}
+                    </TabsList>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="ml-2"
+                      onClick={() => setIsAgentDialogOpen(true)}
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </Tabs>
+              </div>
             )}
           </div>
 
@@ -195,6 +220,6 @@ export default function ChatPage() {
           <AgentFormDialogContent onSubmit={handleCreateAgent} isSubmitting={isSubmitting} />
         </DialogContent>
       </Dialog>
-    </>
+    </SidebarProvider>
   );
 }
