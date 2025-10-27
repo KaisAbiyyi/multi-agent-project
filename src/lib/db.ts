@@ -142,19 +142,44 @@ export async function getAggregatorAgent(): Promise<Agent | undefined> {
 
 /**
  * Update aggregator agent's provider and model
+ * Creates the aggregator if it doesn't exist
  */
-export async function updateAggregatorAgent(provider: AIProvider, modelId: string, apiKeyId?: string): Promise<void> {
+export async function updateAggregatorAgent(provider: AIProvider, modelId: string, apiKeyId?: string): Promise<Agent> {
   const aggregator = await getAggregatorAgent();
   
   if (!aggregator) {
-    throw new Error('Aggregator agent not found');
+    // Create new aggregator agent if it doesn't exist
+    const newAggregator: Agent = {
+      id: crypto.randomUUID(),
+      name: 'Aggregator',
+      description: 'Synthesizes and combines responses from multiple agents',
+      persona: 'You are an expert synthesizer. Your role is to combine insights from multiple AI agents into a single, coherent, and comprehensive response. Identify common themes, resolve contradictions, and present the most valuable insights in a clear and structured manner.',
+      provider,
+      modelId,
+      apiKeyId,
+      isAggregator: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    
+    await db.agents.add(newAggregator);
+    return newAggregator;
   }
 
+  // Update existing aggregator
   await db.agents.update(aggregator.id, {
     provider,
     modelId,
     apiKeyId,
     updatedAt: new Date().toISOString(),
   });
+  
+  // Return updated aggregator
+  const updated = await getAggregatorAgent();
+  if (!updated) {
+    throw new Error('Failed to retrieve updated aggregator');
+  }
+  
+  return updated;
 }
 

@@ -85,6 +85,7 @@ import { generateConversationTitle } from "@/lib/conversation-utils";
 import { useGlobalShortcuts } from "@/hooks/use-global-shortcuts";
 import { MessageItem } from "./message-item";
 import { sanitizeInput } from "@/lib/security";
+import { EmptyState } from "./empty-state";
 
 const MAX_AGENTS_PER_CONVERSATION = 4;
 const RATE_LIMIT_DELAY_MS = 1500;
@@ -1514,6 +1515,11 @@ export function ChatContainer({
   // Multi-agent mode: more than 1 non-aggregator agent selected
   const isMultiAgentMode = selectedAgentIds.length > 1;
 
+  // Check for aggregator and non-aggregator agents
+  const hasAggregator = agents.some((agent) => agent.isAggregator);
+  const hasNonAggregatorAgents = agents.some((agent) => !agent.isAggregator);
+  const showEmptyState = !hasAggregator || !hasNonAggregatorAgents;
+
   const visibleMessages = useMemo(() => {
     if (showDeliberation) {
       return messages;
@@ -1572,19 +1578,35 @@ export function ChatContainer({
         <div className="relative flex flex-1 flex-col overflow-hidden">
           {/* Header with Agent Selection */}
           <div className="bg-background border-b p-4">
-            {agents.length === 0 ? (
+            {showEmptyState ? (
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <SidebarTrigger />
                   <div className="text-muted-foreground flex items-center gap-2">
                     <Bot className="h-4 w-4" />
-                    <span className="text-sm">No agents configured</span>
+                    <span className="text-sm">
+                      {!hasAggregator && !hasNonAggregatorAgents
+                        ? "Setup required: Configure aggregator and create agents"
+                        : !hasAggregator
+                          ? "Setup required: Configure aggregator in settings"
+                          : "Setup required: Create your first agent"}
+                    </span>
                   </div>
                 </div>
-                <Button variant="default" size="sm" onClick={() => setIsAgentDialogOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Agent
-                </Button>
+                <div className="flex items-center gap-2">
+                  {!hasAggregator && (
+                    <Button variant="outline" size="sm" onClick={() => setIsSettingsOpen(true)}>
+                      <Settings className="mr-2 h-4 w-4" />
+                      Settings
+                    </Button>
+                  )}
+                  {!hasNonAggregatorAgents && (
+                    <Button variant="default" size="sm" onClick={() => setIsAgentDialogOpen(true)}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Create Agent
+                    </Button>
+                  )}
+                </div>
               </div>
             ) : (
               <div className="space-y-3">
@@ -1747,19 +1769,13 @@ export function ChatContainer({
             )}
             {visibleMessages.length === 0 ? (
               <div className="flex h-full items-center justify-center">
-                {agents.length === 0 ? (
-                  <div className="flex flex-col items-center text-center">
-                    <Bot className="text-muted-foreground mb-4 h-16 w-16" />
-                    <h3 className="mb-2 text-lg font-semibold">No Agents Yet</h3>
-                    <p className="text-muted-foreground mb-4 max-w-sm text-sm">
-                      Create your first AI agent to start chatting. Configure it with your preferred
-                      provider and model.
-                    </p>
-                    <Button onClick={() => setIsAgentDialogOpen(true)}>
-                      <Plus className="mr-2 h-4 w-4" />
-                      Create Your First Agent
-                    </Button>
-                  </div>
+                {showEmptyState ? (
+                  <EmptyState 
+                    onCreateAgent={() => setIsAgentDialogOpen(true)}
+                    onOpenSettings={() => setIsSettingsOpen(true)}
+                    hasAggregator={hasAggregator}
+                    hasAgents={hasNonAggregatorAgents}
+                  />
                 ) : (
                   <p className="text-muted-foreground">
                     Start a new conversation by typing a message below
@@ -1809,15 +1825,16 @@ export function ChatContainer({
               )}
           </div>
 
-          {/* Input Area */}
-          <div
-            className={cn(
-              "p-4 transition-all duration-300",
-              isComposerFloating
-                ? "pointer-events-none absolute top-1/2 left-1/2 z-20 w-full max-w-5xl -translate-x-1/2 -translate-y-1/2"
-                : "bg-background border-t"
-            )}
-          >
+          {/* Input Area - Only show when both aggregator and agents exist */}
+          {!showEmptyState && (
+            <div
+              className={cn(
+                "p-4 transition-all duration-300",
+                isComposerFloating
+                  ? "pointer-events-none absolute top-1/2 left-1/2 z-20 w-full max-w-5xl -translate-x-1/2 -translate-y-1/2"
+                  : "bg-background border-t"
+              )}
+            >
             <div
               className={cn(
                 "mx-auto w-full max-w-4xl",
@@ -1904,6 +1921,7 @@ export function ChatContainer({
               ) : null}
             </div>
           </div>
+          )}
         </div>
       </div>
 

@@ -114,7 +114,7 @@ export function AggregatorConfiguration() {
     if (providerConfig.requiresAPIKey && !apiKeyId) {
       toast({
         title: 'API Key Required',
-        description: `${providerConfig.name} requires an API key. Please select one or add a new key in settings.`,
+        description: `${providerConfig.name} requires an API key. Please select one or add a new key in the API Keys tab.`,
         variant: 'destructive',
       });
       return;
@@ -122,17 +122,18 @@ export function AggregatorConfiguration() {
 
     setIsSaving(true);
     try {
-      await updateAggregatorAgent(provider, modelId, apiKeyId);
+      const isInitialSetup = !aggregator;
       
-      // Reload aggregator
-      const updated = await getAggregatorAgent();
-      if (updated) {
-        setAggregator(updated);
-      }
+      const updatedAggregator = await updateAggregatorAgent(provider, modelId, apiKeyId);
+      
+      // Update local state with the returned aggregator
+      setAggregator(updatedAggregator);
 
       toast({
         title: 'Success',
-        description: 'Aggregator configuration updated successfully',
+        description: isInitialSetup 
+          ? 'Aggregator configured successfully! You can now create agents and start chatting.' 
+          : 'Aggregator configuration updated successfully',
       });
     } catch (error) {
       console.error('Failed to update aggregator:', error);
@@ -153,6 +154,9 @@ export function AggregatorConfiguration() {
     (aggregator.provider !== provider || 
      aggregator.modelId !== modelId || 
      aggregator.apiKeyId !== apiKeyId);
+  
+  // Determine if this is initial setup or update
+  const isInitialSetup = !aggregator;
 
   if (isLoading) {
     return (
@@ -173,27 +177,6 @@ export function AggregatorConfiguration() {
     );
   }
 
-  if (!aggregator) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Bot className="h-5 w-5" />
-            Aggregator Configuration
-          </CardTitle>
-          <CardDescription>
-            Configure the AI model used to synthesize multi-agent responses
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">
-            Aggregator agent not found. Please refresh the page.
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card>
       <CardHeader>
@@ -202,21 +185,37 @@ export function AggregatorConfiguration() {
           Aggregator Configuration
         </CardTitle>
         <CardDescription>
-          The aggregator combines multiple agent responses into a single, coherent answer.
-          You can choose which AI provider and model to use for this synthesis.
+          {isInitialSetup 
+            ? 'Setup the aggregator to combine multiple agent responses into a single, coherent answer.'
+            : 'The aggregator combines multiple agent responses into a single, coherent answer. You can change the AI provider and model used for this synthesis.'}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Current Configuration Info */}
-        <div className="rounded-lg bg-muted p-4 space-y-2">
-          <p className="text-sm font-medium">Current Configuration</p>
-          <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
-            <span>Provider:</span>
-            <span className="font-medium text-foreground">{AI_PROVIDERS[aggregator.provider].name}</span>
-            <span>Model:</span>
-            <span className="font-medium text-foreground">{aggregator.modelId}</span>
+        {/* Initial Setup Warning */}
+        {isInitialSetup && (
+          <div className="rounded-lg border-primary bg-primary/10 p-4">
+            <p className="text-sm font-medium text-primary mb-2">
+              ⚡ Initial Setup Required
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Configure your aggregator to start using multi-agent conversations. 
+              Choose a provider and model below, then click Apply.
+            </p>
           </div>
-        </div>
+        )}
+
+        {/* Current Configuration Info - Only show if aggregator exists */}
+        {!isInitialSetup && (
+          <div className="rounded-lg bg-muted p-4 space-y-2">
+            <p className="text-sm font-medium">Current Configuration</p>
+            <div className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
+              <span>Provider:</span>
+              <span className="font-medium text-foreground">{AI_PROVIDERS[aggregator.provider].name}</span>
+              <span>Model:</span>
+              <span className="font-medium text-foreground">{aggregator.modelId}</span>
+            </div>
+          </div>
+        )}
 
         {/* Provider Selection */}
         <div className="space-y-2">
@@ -331,15 +330,21 @@ export function AggregatorConfiguration() {
           </p>
         </div>
 
-        {/* Save Button */}
+        {/* Apply/Save Button */}
         <Button 
           onClick={handleSave} 
-          disabled={!hasRequiredApiKey || !modelId || !hasChanges || isSaving}
+          disabled={!hasRequiredApiKey || !modelId || (!isInitialSetup && !hasChanges) || isSaving}
           className="w-full"
         >
           {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          {isSaving ? 'Saving...' : 'Save Configuration'}
+          {isSaving ? 'Applying...' : isInitialSetup ? 'Apply Configuration' : 'Save Changes'}
         </Button>
+        
+        {!isInitialSetup && !hasChanges && (
+          <p className="text-sm text-muted-foreground text-center">
+            No changes to save
+          </p>
+        )}
       </CardContent>
     </Card>
   );
