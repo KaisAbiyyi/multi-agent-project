@@ -44,11 +44,11 @@ export interface Agent {
   id: string;
   name: string;
   description?: string;
-  persona: string; // System prompt/instructions
+  persona?: string; // Optional system prompt/instructions
+  provider: AIProvider; // Each agent can use different provider
   modelId: string; // Reference to AIModel
   apiKeyId?: string; // Reference to APIKey (optional - e.g., Ollama doesn't need it, LLM7 is optional)
-  temperature?: number;
-  maxTokens?: number;
+  isAggregator?: boolean; // Special aggregator agent - cannot be deleted, persona is fixed
   createdAt: string;
   updatedAt: string;
 }
@@ -67,8 +67,22 @@ export interface Council {
 }
 
 /**
+ * Agent Combination - Saved set of agents for quick reuse
+ */
+export interface AgentCombination {
+  id: string;
+  name: string;
+  description?: string;
+  agentIds: string[]; // Array of agent IDs in this combination
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
  * Message in a conversation
  */
+export type MessageStage = "initial" | "refined" | "final";
+
 export interface Message {
   id: string;
   conversationId?: string; // Reference to conversation
@@ -76,6 +90,11 @@ export interface Message {
   content: string;
   agentId?: string; // If from a specific agent
   timestamp: string;
+  stage?: MessageStage;
+  stageLabel?: string;
+  initialContent?: string;
+  authorLabel?: string;
+  isHidden?: boolean;
 }
 
 /**
@@ -99,11 +118,13 @@ export interface AgentResponse {
 export interface Conversation {
   id: string;
   title: string;
-  councilId: string; // Reference to Council
-  messages: Message[];
+  councilId?: string; // Optional reference to Council (for multi-agent)
+  agentIds?: string[]; // Selected agents participating in the conversation
+  messages?: Message[]; // Populated when loading conversation
   createdAt: string;
   updatedAt: string;
   archived?: boolean;
+  isPinned?: boolean; // Pin conversation to top of list
 }
 
 /**
@@ -152,6 +173,7 @@ export const STORAGE_KEYS = {
   API_KEYS: "aegis_api_keys",
   AGENTS: "aegis_agents",
   COUNCILS: "aegis_councils",
+  AGENT_COMBINATIONS: "aegis_agent_combinations",
   CONVERSATIONS: "aegis_conversations",
   SETTINGS: "aegis_settings",
   ENCRYPTION_KEY: "aegis_encryption_key",

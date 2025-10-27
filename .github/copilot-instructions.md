@@ -6,6 +6,7 @@
 
 - **ALWAYS** read `docs/prd.md` before starting any task to understand the product vision and requirements
 - **ALWAYS** read `docs/plan.md` to check which tasks are pending and which are completed
+- **ALWAYS** read `docs/changes.md` to understand the top recent changes and current implementation status
 - **ALWAYS** verify the current task status before proceeding with work
 
 ### Package Management

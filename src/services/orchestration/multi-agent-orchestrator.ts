@@ -23,6 +23,14 @@ import { callAIModel } from '../api/ai-client';
 import { getAgentById } from '../storage/agent-storage';
 import { getAPIKeyById } from '../storage/api-key-storage';
 
+export function composeSystemPrompt(agent: Agent): string {
+  const nameReminder = `You are known as ${agent.name}. I will call you ${agent.name}.`;
+  const persona = agent.persona?.trim();
+  return persona ? `${persona}
+
+${nameReminder}` : nameReminder;
+}
+
 /**
  * Main orchestration function
  * Routes to single or multi-agent flow based on agent count
@@ -86,14 +94,14 @@ async function singleAgentFlow(
 
   const apiKey = agent.apiKeyId ? await getAPIKey(agent.apiKeyId) : undefined;
 
-  const response = await callAIModel(
-    agent,
-    {
-      prompt: userPrompt,
-      systemPrompt: agent.persona,
-    },
-    apiKey
-  );
+    const response = await callAIModel(
+      agent,
+      {
+        prompt: userPrompt,
+        systemPrompt: composeSystemPrompt(agent),
+      },
+      apiKey
+    );
 
   const agentResponse: AgentResponse = {
     agentId: agent.id,
@@ -171,7 +179,7 @@ async function getInitialResponses(
           agent,
           {
             prompt: userPrompt,
-            systemPrompt: agent.persona,
+            systemPrompt: composeSystemPrompt(agent),
           },
           apiKey
         );
@@ -207,56 +215,87 @@ async function refineResponses(
   userPrompt: string,
   initialResponses: AgentResponse[]
 ): Promise<RefinedResponse[]> {
-  const refinedResponses = await Promise.all(
-    agents.map(async (agent, index) => {
-      const myInitialResponse = initialResponses[index];
-      if (!myInitialResponse) {
-        throw new Error(`No initial response found for agent ${agent.name}`);
-      }
-      
-      const otherResponses = initialResponses.filter((_, i) => i !== index);
+  const refinedResponses: RefinedResponse[] = [];
+  const latestResponses = new Map<string, AgentResponse>(
+    initialResponses.map((response) => [response.agentId, response])
+  );
 
-      console.log(`[Orchestration] ${agent.name} refining response based on ${otherResponses.length} other agents...`);
+  for (const agent of agents) {
+    const myInitialResponse = initialResponses.find((response) => response.agentId === agent.id);
+    if (!myInitialResponse) {
+      throw new Error(`No initial response found for agent ${agent.name}`);
+    }
 
-      // Build refinement prompt
-      const refinementPrompt = buildRefinementPrompt(
-        userPrompt,
-        myInitialResponse.content,
-        otherResponses
-      );
+    const otherResponses: AgentResponse[] = agents
+      .filter((other) => other.id !== agent.id)
+      .map((other) => {
+        const latest = latestResponses.get(other.id);
+        if (latest) {
+          return latest;
+        }
 
-      const apiKey = agent.apiKeyId ? await getAPIKey(agent.apiKeyId) : undefined;
-
-      try {
-        const response = await callAIModel(
-          agent,
-          {
-            prompt: refinementPrompt,
-            systemPrompt: agent.persona,
-          },
-          apiKey
-        );
+        const fallback = initialResponses.find((response) => response.agentId === other.id);
+        if (fallback) {
+          return fallback;
+        }
 
         return {
-          agentId: agent.id,
-          agentName: agent.name,
-          content: response.content,
-          originalResponse: myInitialResponse.content,
+          agentId: other.id,
+          agentName: other.name,
+          content: '',
           timestamp: new Date().toISOString(),
         };
-      } catch (error) {
-        console.error(`[Orchestration] Error refining for ${agent.name}:`, error);
-        // Fallback to original response if refinement fails
-        return {
-          agentId: myInitialResponse.agentId,
-          agentName: myInitialResponse.agentName,
-          content: myInitialResponse.content,
-          originalResponse: myInitialResponse.content,
-          timestamp: myInitialResponse.timestamp,
-        };
-      }
-    })
-  );
+      });
+
+    console.log(
+      `[Orchestration] ${agent.name} refining response based on ${otherResponses.length} other agents...`
+    );
+
+    const refinementPrompt = buildRefinementPrompt(
+      userPrompt,
+      myInitialResponse.content,
+      otherResponses
+    );
+
+    const apiKey = agent.apiKeyId ? await getAPIKey(agent.apiKeyId) : undefined;
+
+    try {
+      const response = await callAIModel(
+        agent,
+        {
+          prompt: refinementPrompt,
+          systemPrompt: composeSystemPrompt(agent),
+        },
+        apiKey
+      );
+
+      const refinedResponse: RefinedResponse = {
+        agentId: agent.id,
+        agentName: agent.name,
+        content: response.content,
+        originalResponse: myInitialResponse.content,
+        timestamp: new Date().toISOString(),
+      };
+
+      refinedResponses.push(refinedResponse);
+      latestResponses.set(agent.id, {
+        agentId: refinedResponse.agentId,
+        agentName: refinedResponse.agentName,
+        content: refinedResponse.content,
+        timestamp: refinedResponse.timestamp,
+      });
+    } catch (error) {
+      console.error(`[Orchestration] Error refining for ${agent.name}:`, error);
+      refinedResponses.push({
+        agentId: myInitialResponse.agentId,
+        agentName: myInitialResponse.agentName,
+        content: myInitialResponse.content,
+        originalResponse: myInitialResponse.content,
+        timestamp: myInitialResponse.timestamp,
+      });
+      latestResponses.set(myInitialResponse.agentId, myInitialResponse);
+    }
+  }
 
   console.log(`[Orchestration] Collected ${refinedResponses.length} refined responses`);
   return refinedResponses;
@@ -303,7 +342,7 @@ async function aggregateResponses(
       firstAgent,
       {
         prompt: aggregationPrompt,
-        systemPrompt: 'You are an expert at synthesizing multiple perspectives into a coherent, comprehensive response. Combine the insights from different agents while maintaining clarity and accuracy.',
+  systemPrompt: 'You are a neutral synthesis expert. Resolve disagreements, preserve the strongest evidence, and present a confident, user-facing answer in natural language without mentioning the deliberation process or the individual agents.',
       },
       apiKey
     );
@@ -320,7 +359,7 @@ async function aggregateResponses(
 /**
  * Build refinement prompt for an agent
  */
-function buildRefinementPrompt(
+export function buildRefinementPrompt(
   userPrompt: string,
   myResponse: string,
   otherResponses: AgentResponse[]
@@ -336,19 +375,24 @@ ${otherResponses.map(r => `**${r.agentName}:**\n${r.content}`).join('\n\n')}
 
 ---
 
-Now, please refine and improve your response by considering the perspectives and insights from the other agents. Maintain your unique viewpoint while incorporating valuable points from others. Provide only your refined answer without meta-commentary.`;
+With care and intellectual honesty, improve your answer by:
+- Stress-testing your assumptions against the strongest counterpoints raised by the other agents.
+- Explicitly addressing any disagreements, filling in missing evidence, or correcting mistakes (yours or theirs).
+- Bringing forward novel insights that move the whole group closer to an excellent solution.
+
+Preserve your own voice while acknowledging where another agent has a better argument or data. Provide only your refined answer without meta-commentary.`;
 }
 
 /**
  * Build aggregation prompt
  */
-function buildAggregationPrompt(
+export function buildAggregationPrompt(
   userPrompt: string,
   refinedResponses: RefinedResponse[],
   customPrompt?: string
 ): string {
   const defaultPrompt = customPrompt || 
-    'Synthesize the following responses into a single, comprehensive answer that captures the best insights from all agents.';
+    'Develop a single, trustworthy answer that resolves disagreements, highlights the most useful reasoning, and communicates next steps in clear, natural language. Do not reference the agents or the debate explicitly—deliver the result as if you are the expert speaking directly to the user.';
 
   return `Original User Question:
 ${userPrompt}

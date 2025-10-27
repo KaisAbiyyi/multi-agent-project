@@ -37,7 +37,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Plus, Trash2, Edit, Check, X, Eye, EyeOff, AlertCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
-const AI_PROVIDER_OPTIONS: AIProvider[] = ['ollama', 'openrouter', 'llm7'];
+const AI_PROVIDER_OPTIONS: AIProvider[] = ['openrouter', 'llm7']; // Only providers that need API keys
 
 export function APIKeyManagement() {
   const { apiKeys, isLoading, error, createAPIKey, updateAPIKey, deleteAPIKey } = useAPIKeys();
@@ -60,7 +60,7 @@ export function APIKeyManagement() {
   const resetForm = () => {
     setFormData({
       name: '',
-      provider: 'openai' as AIProvider,
+      provider: 'openrouter' as AIProvider, // Default to openrouter instead of openai
       key: '',
       baseURL: '',
       isActive: true,
@@ -192,28 +192,28 @@ export function APIKeyManagement() {
           {apiKeys.map((key) => (
             <Card key={key.id}>
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1 flex-1">
-                    <CardTitle className="text-base flex items-center gap-2">
-                      {key.name}
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <CardTitle className="text-base flex flex-wrap items-center gap-2">
+                      <span className="truncate">{key.name}</span>
                       {key.isActive ? (
-                        <Badge variant="default" className="ml-2">
+                        <Badge variant="default" className="shrink-0">
                           <Check className="h-3 w-3 mr-1" />
                           Active
                         </Badge>
                       ) : (
-                        <Badge variant="secondary">
+                        <Badge variant="secondary" className="shrink-0">
                           <X className="h-3 w-3 mr-1" />
                           Inactive
                         </Badge>
                       )}
                     </CardTitle>
-                    <CardDescription className="flex items-center gap-2">
+                    <CardDescription className="flex flex-wrap items-center gap-2">
                       <Badge variant="outline">{key.provider.toUpperCase()}</Badge>
-                      {key.baseURL && <span className="text-xs">• {key.baseURL}</span>}
+                      {key.baseURL && <span className="text-xs truncate">• {key.baseURL}</span>}
                     </CardDescription>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-2 shrink-0">
                     <Button variant="ghost" size="sm" onClick={() => handleEdit(key)}>
                       <Edit className="h-4 w-4" />
                     </Button>
@@ -224,14 +224,15 @@ export function APIKeyManagement() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-muted px-3 py-2 rounded text-sm font-mono">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <code className="flex-1 bg-muted px-3 py-2 rounded text-sm font-mono overflow-x-auto whitespace-nowrap">
                     {showKey[key.id] ? key.key : maskKey(key.key)}
                   </code>
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => toggleKeyVisibility(key.id)}
+                    className="shrink-0"
                   >
                     {showKey[key.id] ? (
                       <EyeOff className="h-4 w-4" />
@@ -248,11 +249,11 @@ export function APIKeyManagement() {
 
       {/* Add Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Add API Key</DialogTitle>
             <DialogDescription>
-              Add a new API key for your AI provider
+              Add API keys for OpenRouter or LLM7. Ollama runs locally and doesn&apos;t need an API key.
             </DialogDescription>
           </DialogHeader>
 
@@ -295,18 +296,10 @@ export function APIKeyManagement() {
                 value={formData.key}
                 onChange={(e) => setFormData({ ...formData, key: e.target.value })}
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="baseURL">Base URL (optional)</Label>
-              <Input
-                id="baseURL"
-                placeholder="https://api.openai.com/v1"
-                value={formData.baseURL}
-                onChange={(e) => setFormData({ ...formData, baseURL: e.target.value })}
-              />
               <p className="text-xs text-muted-foreground">
-                Required for Ollama and custom endpoints
+                {formData.provider === 'openrouter' 
+                  ? 'Get your key from openrouter.ai'
+                  : 'Get your key from llm7.io'}
               </p>
             </div>
           </div>
@@ -324,7 +317,7 @@ export function APIKeyManagement() {
 
       {/* Edit Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Edit API Key</DialogTitle>
             <DialogDescription>Update your API key configuration</DialogDescription>
@@ -367,15 +360,11 @@ export function APIKeyManagement() {
                 value={formData.key}
                 onChange={(e) => setFormData({ ...formData, key: e.target.value })}
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="edit-baseURL">Base URL (optional)</Label>
-              <Input
-                id="edit-baseURL"
-                value={formData.baseURL}
-                onChange={(e) => setFormData({ ...formData, baseURL: e.target.value })}
-              />
+              <p className="text-xs text-muted-foreground">
+                {formData.provider === 'openrouter' 
+                  ? 'Get your key from openrouter.ai'
+                  : 'Get your key from llm7.io'}
+              </p>
             </div>
           </div>
 

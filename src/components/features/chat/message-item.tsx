@@ -1,0 +1,109 @@
+import { memo } from 'react';
+import { Bot, User } from 'lucide-react';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { MarkdownRenderer } from '@/components/shared/markdown-renderer';
+import { Badge } from '@/components/ui/badge';
+import type { Message } from '@/types';
+
+interface MessageItemProps {
+  message: Message;
+  agentName?: string;
+}
+
+/**
+ * Memoized message item component to prevent unnecessary re-renders
+ * Only re-renders when message content or agent name changes
+ */
+export const MessageItem = memo(function MessageItem({ message, agentName }: MessageItemProps) {
+  const isUser = message.role === 'user';
+  const displayName = message.authorLabel || agentName || 'AI';
+
+  return (
+    <div
+      className={`flex gap-4 ${
+        isUser ? 'justify-end' : 'justify-start'
+      }`}
+    >
+      {!isUser && (
+        <Avatar className="mt-1 h-8 w-8">
+          <AvatarFallback className="bg-primary text-primary-foreground">
+            <Bot className="h-4 w-4" />
+          </AvatarFallback>
+        </Avatar>
+      )}
+
+      <div
+        className={`max-w-[80%] flex-1 rounded-lg p-4 ${
+          isUser
+            ? 'bg-primary text-primary-foreground ml-auto'
+            : 'bg-muted'
+        }`}
+      >
+        {!isUser && (
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold">{displayName}</span>
+            {message.stageLabel && (
+              <Badge variant="outline" className="text-xs">
+                {message.stageLabel}
+              </Badge>
+            )}
+          </div>
+        )}
+
+        {message.initialContent && message.initialContent !== message.content && (
+          <div className="bg-muted-foreground/10 mb-3 rounded border-l-2 border-primary/50 p-2 text-xs italic">
+            <MarkdownRenderer content={message.initialContent} />
+          </div>
+        )}
+
+        <div className="prose prose-sm dark:prose-invert max-w-none break-words">
+          {message.content ? (
+            <MarkdownRenderer content={message.content} />
+          ) : (
+            <div className="text-muted-foreground flex items-center gap-2">
+              <div className="flex gap-1">
+                <span
+                  className="h-2 w-2 animate-bounce rounded-full bg-current"
+                  style={{ animationDelay: '0ms' }}
+                ></span>
+                <span
+                  className="h-2 w-2 animate-bounce rounded-full bg-current"
+                  style={{ animationDelay: '150ms' }}
+                ></span>
+                <span
+                  className="h-2 w-2 animate-bounce rounded-full bg-current"
+                  style={{ animationDelay: '300ms' }}
+                ></span>
+              </div>
+              <span className="text-xs">Thinking...</span>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-2 text-xs opacity-70">
+          {new Date(message.timestamp).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}
+        </div>
+      </div>
+
+      {isUser && (
+        <Avatar className="mt-1 h-8 w-8">
+          <AvatarFallback className="bg-secondary">
+            <User className="h-4 w-4" />
+          </AvatarFallback>
+        </Avatar>
+      )}
+    </div>
+  );
+}, (prevProps, nextProps) => {
+  // Custom comparison function for better performance
+  return (
+    prevProps.message.id === nextProps.message.id &&
+    prevProps.message.content === nextProps.message.content &&
+    prevProps.message.stageLabel === nextProps.message.stageLabel &&
+    prevProps.message.initialContent === nextProps.message.initialContent &&
+    prevProps.agentName === nextProps.agentName
+  );
+});

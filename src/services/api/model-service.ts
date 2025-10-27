@@ -1,5 +1,9 @@
 import type { AIProvider, AIModel } from '@/types';
 
+interface FetchModelOptions {
+  freeOnly?: boolean;
+}
+
 /**
  * Fetch available models from Ollama local instance
  */
@@ -91,7 +95,7 @@ export async function fetchLLM7Models(apiKey?: string): Promise<AIModel[]> {
 /**
  * Fetch available models from OpenRouter
  */
-export async function fetchOpenRouterModels(apiKey?: string): Promise<AIModel[]> {
+export async function fetchOpenRouterModels(apiKey?: string, options: FetchModelOptions = {}): Promise<AIModel[]> {
   try {
     console.log('[OpenRouter Models] Fetching models from https://openrouter.ai/api/v1/models...');
     
@@ -119,7 +123,26 @@ export async function fetchOpenRouterModels(apiKey?: string): Promise<AIModel[]>
     const models = data.data || [];
     console.log('[OpenRouter Models] Found models:', models.length);
 
-    return models.map((model: { 
+    const isFreePrice = (value: unknown) => {
+      if (value == null) return false;
+      const normalized = String(value).trim().toLowerCase();
+      if (!normalized) return false;
+      if (normalized === 'free') return true;
+      const numeric = Number.parseFloat(normalized);
+      return Number.isFinite(numeric) && numeric === 0;
+    };
+
+    const filteredModels = options.freeOnly
+      ? models.filter((model: { pricing?: { prompt?: string; completion?: string } }) => {
+          const promptPrice = model.pricing?.prompt;
+          const completionPrice = model.pricing?.completion;
+          return isFreePrice(promptPrice) && isFreePrice(completionPrice);
+        })
+      : models;
+
+    console.log('[OpenRouter Models] Models retained after filtering:', filteredModels.length);
+
+    return filteredModels.map((model: { 
       id: string; 
       name?: string; 
       context_length?: number;
@@ -146,7 +169,8 @@ export async function fetchOpenRouterModels(apiKey?: string): Promise<AIModel[]>
  */
 export async function fetchModelsByProvider(
   provider: AIProvider,
-  apiKey?: string
+  apiKey?: string,
+  options: FetchModelOptions = {}
 ): Promise<AIModel[]> {
   switch (provider) {
     case 'ollama':
@@ -154,7 +178,7 @@ export async function fetchModelsByProvider(
     case 'llm7':
       return fetchLLM7Models(apiKey);
     case 'openrouter':
-      return fetchOpenRouterModels(apiKey);
+      return fetchOpenRouterModels(apiKey, options);
     default:
       return [];
   }

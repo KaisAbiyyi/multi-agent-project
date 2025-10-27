@@ -131,7 +131,12 @@ export const STORAGE_KEYS = {
 /**
  * API request timeout (ms)
  */
-export const API_TIMEOUT = 60000; // 60 seconds
+/**
+ * API timeout for requests (in milliseconds)
+ * Note: This is now used as a fallback. The streaming API uses inactivity timeout
+ * which allows for longer responses as long as data keeps flowing.
+ */
+export const API_TIMEOUT = 120000; // 120 seconds (2 minutes) - for non-streaming requests
 
 /**
  * Maximum retries for failed API requests
@@ -142,3 +147,18 @@ export const MAX_RETRIES = 3;
  * Debounce delay for autosave (ms)
  */
 export const AUTOSAVE_DELAY = 1000;
+
+/**
+ * Feature Flags
+ */
+export const FEATURE_FLAGS = {
+  /**
+   * Enable debate/refinement stage in multi-agent orchestration
+   * When false: User prompt → Agent responses → Aggregation
+   * When true: User prompt → Agent responses → Debate/Refinement → Aggregation
+   * 
+   * Set to false for simpler, faster multi-agent flow.
+   * Set to true for advanced deliberation with iterative refinement (future pro feature).
+   */
+  ENABLE_DEBATE_MODE: false,
+} as const;

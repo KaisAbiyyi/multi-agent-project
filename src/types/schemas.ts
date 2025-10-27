@@ -8,7 +8,7 @@ import { z } from "zod";
 /**
  * AI Provider schema
  */
-export const AIProviderSchema = z.enum(["openai", "openrouter", "groq", "ollama", "anthropic"]);
+export const AIProviderSchema = z.enum(["ollama", "openrouter", "llm7"]);
 
 /**
  * API Key validation schema
@@ -66,12 +66,13 @@ export const AgentSchema = z.object({
   description: z.string().max(500, "Description is too long").optional(),
   persona: z
     .string()
-    .min(10, "Persona must be at least 10 characters")
-    .max(5000, "Persona is too long"),
+    .max(5000, "Persona is too long")
+    .optional()
+    .or(z.literal("")), // Persona is now optional - can be empty string or undefined
+  provider: AIProviderSchema, // Each agent has its own provider
   modelId: z.string().min(1, "Model is required"),
   apiKeyId: z.string().optional(), // API key is optional (e.g., Ollama doesn't need it, LLM7 is optional)
-  temperature: z.number().min(0).max(2).default(0.7).optional(),
-  maxTokens: z.number().int().positive().max(128000).default(2048).optional(),
+  isAggregator: z.boolean().optional(), // Special aggregator agent flag
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

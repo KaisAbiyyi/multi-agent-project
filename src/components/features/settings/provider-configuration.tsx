@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Loader2, Server, Globe, Zap, AlertCircle, Edit2, Save } from "lucide-react";
+import { Loader2, Server, Globe, Zap, AlertCircle, Edit2, Save, ExternalLink } from "lucide-react";
 import { useProviderPreference } from "@/hooks/use-provider-preference";
 import { useAPIKeys } from "@/hooks/use-api-keys";
 import type { AIProvider } from "@/types";
@@ -33,6 +33,58 @@ const PROVIDER_INFO = {
   },
 };
 
+const PROVIDER_FACTS: Record<AIProvider, {
+  pros: string[];
+  cons: string[];
+  sources: { label: string; url: string }[];
+}> = {
+  ollama: {
+    pros: [
+      "Runs entirely on your local machine—your prompts never leave the device.",
+      "No API key, billing account, or external network access required.",
+      "Great for offline experimentation with open-source models you install yourself.",
+    ],
+    cons: [
+      "Needs adequate local CPU/GPU resources and disk space for model downloads.",
+      "Model selection is limited to what you manually install and maintain.",
+      "You handle updates, performance tuning, and uptime on your own hardware.",
+    ],
+    sources: [],
+  },
+  openrouter: {
+    pros: [
+      "Single API endpoint unlocks hundreds of hosted models with automatic fallbacks (OpenRouter Quickstart).",
+      "Works with familiar OpenAI client libraries and supports streaming out of the box (OpenRouter Quickstart).",
+      "Lets you pick cost-effective models per request without rewriting integration code (OpenRouter Quickstart).",
+    ],
+    cons: [
+      "Requires an OpenRouter API key and outbound internet connectivity (OpenRouter Quickstart).",
+      "Usage is subject to OpenRouter's rate limits and policies (OpenRouter FAQ).",
+      "Prompts are processed through OpenRouter's infrastructure before reaching the upstream model (OpenRouter Quickstart).",
+    ],
+    sources: [
+      { label: "OpenRouter Quickstart", url: "https://openrouter.ai/docs/quickstart" },
+      { label: "OpenRouter FAQ — Rate limits", url: "https://openrouter.ai/docs/faq#how-are-rate-limits-calculated" },
+    ],
+  },
+  llm7: {
+    pros: [
+      "Community-backed service with a donor-supported free tier (LLM7 Terms §2).",
+      "Personal API tokens can be rotated via token.llm7.io for security (LLM7 Terms §3).",
+      "Collects only minimal personal data and never sells it (LLM7 Privacy §§2–7).",
+    ],
+    cons: [
+      "Tokens may be rate-limited, suspended, or revoked to protect the service (LLM7 Terms §3).",
+      "Best-effort availability with no guaranteed uptime or throughput (LLM7 Terms §9).",
+      "Traffic flows through Cloudflare's infrastructure, so requests leave your local environment (LLM7 Privacy §4).",
+    ],
+    sources: [
+      { label: "LLM7 Terms", url: "https://github.com/chigwell/llm7.io/blob/main/TERMS.md" },
+      { label: "LLM7 Privacy", url: "https://github.com/chigwell/llm7.io/blob/main/PRIVACY.md" },
+    ],
+  },
+};
+
 export function ProviderConfiguration() {
   const { activeProvider, setActiveProvider, isLoading: isLoadingPref } = useProviderPreference();
   const { apiKeys, createAPIKey, deleteAPIKey, isLoading: isLoadingKeys } = useAPIKeys();
@@ -52,20 +104,16 @@ export function ProviderConfiguration() {
   useEffect(() => {
     if (activeProvider) {
       setSelectedProvider(activeProvider.provider);
-      
-      // Load existing API keys
-      if (activeProvider.apiKeyId) {
-        const key = apiKeys.find(k => k.id === activeProvider.apiKeyId);
-        if (key) {
-          if (activeProvider.provider === "openrouter") {
-            setOpenRouterKey(key.key);
-          } else if (activeProvider.provider === "llm7") {
-            setLLM7Key(key.key);
-          }
-        }
-      }
     }
-  }, [activeProvider, apiKeys]);
+  }, [activeProvider]);
+
+  useEffect(() => {
+    const openRouterStored = apiKeys.find((k) => k.provider === "openrouter");
+    const llm7Stored = apiKeys.find((k) => k.provider === "llm7");
+
+    setOpenRouterKey(openRouterStored?.key ?? "");
+    setLLM7Key(llm7Stored?.key ?? "");
+  }, [apiKeys]);
 
   const handleSaveApiKey = async (provider: AIProvider, keyValue: string) => {
     if (!keyValue.trim()) {
@@ -341,6 +389,56 @@ export function ProviderConfiguration() {
           );
         })}
       </RadioGroup>
+
+      <div className="rounded-lg border bg-muted/40 p-4">
+        <div className="flex flex-col gap-1">
+          <h4 className="text-sm font-semibold">Pros & Cons</h4>
+          <p className="text-xs text-muted-foreground">
+            Key trade-offs for {PROVIDER_INFO[selectedProvider].name} based on the latest docs.
+          </p>
+        </div>
+        <div className="mt-4 grid gap-4 md:grid-cols-2">
+          <div>
+            <div className="text-xs font-semibold uppercase text-muted-foreground">Pros</div>
+            <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+              {PROVIDER_FACTS[selectedProvider].pros.map((item) => (
+                <li key={item} className="flex gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-emerald-500" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div>
+            <div className="text-xs font-semibold uppercase text-muted-foreground">Cons</div>
+            <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+              {PROVIDER_FACTS[selectedProvider].cons.map((item) => (
+                <li key={item} className="flex gap-2">
+                  <span className="mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-rose-500" />
+                  <span>{item}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+        {PROVIDER_FACTS[selectedProvider].sources.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+            <span className="font-medium">Sources:</span>
+            {PROVIDER_FACTS[selectedProvider].sources.map((source) => (
+              <a
+                key={source.url}
+                href={source.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 hover:text-foreground"
+              >
+                {source.label}
+                <ExternalLink className="h-3 w-3" />
+              </a>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="flex justify-end pt-4 border-t">
         <Button onClick={() => handleSaveConfiguration()} disabled={isSaving}>

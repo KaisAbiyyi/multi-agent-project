@@ -109,6 +109,7 @@ async function createConversation(data: {
     title: data.title,
     councilId: '', // Legacy field, keep empty for now
     messages: [],  // We'll store messages separately
+    agentIds: data.agentIds,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });

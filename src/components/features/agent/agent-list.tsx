@@ -58,7 +58,7 @@ export function AgentList({
         (agent) =>
           agent.name.toLowerCase().includes(query) ||
           agent.description?.toLowerCase().includes(query) ||
-          agent.persona.toLowerCase().includes(query)
+          agent.persona?.toLowerCase().includes(query)
       );
     }
 

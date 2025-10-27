@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import type { Agent, AIModel } from '@/types';
+import type { Agent, AIModel, AgentCombination, AIProvider } from '@/types';
 import { AgentSchema, type AgentInput } from '@/types/schemas';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -24,20 +24,41 @@ import {
   FormLabel,
   FormMessage,
 } from '@/components/ui/form';
-import { Slider } from '@/components/ui/slider';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle, Settings2, Trash2 } from 'lucide-react';
-import { AI_PROVIDERS } from '@/constants';
-import { fetchModelsByProvider } from '@/services/api/model-service';
+import { Loader2, AlertCircle, Trash2, Server, Globe, Zap } from 'lucide-react';
+import { fetchOllamaModels, fetchOpenRouterModels, fetchLLM7Models } from '@/services/api/model-service';
 import { useAPIKeys } from '@/hooks/use-api-keys';
-import { useProviderPreference } from '@/hooks/use-provider-preference';
 import { PersonaSelector } from './persona-selector';
+import { Switch } from '@/components/ui/switch';
+
+const PROVIDER_INFO = {
+  ollama: {
+    name: "Ollama",
+    description: "Local AI models",
+    icon: Server,
+    requiresApiKey: false,
+  },
+  openrouter: {
+    name: "OpenRouter",
+    description: "Multiple AI models",
+    icon: Globe,
+    requiresApiKey: true,
+  },
+  llm7: {
+    name: "LLM7",
+    description: "LLM7 models (key optional)",
+    icon: Zap,
+    requiresApiKey: false,
+  },
+} as const;
 
 interface AgentFormDialogContentProps {
   agent?: Agent;
   onSubmit: (data: AgentInput) => void;
   onDelete?: () => void;
   isSubmitting?: boolean;
+  agentCombinations?: AgentCombination[];
+  onApplyCombination?: (combination: AgentCombination) => void;
 }
 
 export function AgentFormDialogContent({
@@ -45,14 +66,17 @@ export function AgentFormDialogContent({
   onSubmit,
   onDelete,
   isSubmitting = false,
+  agentCombinations,
+  onApplyCombination,
 }: AgentFormDialogContentProps) {
   const { apiKeys } = useAPIKeys();
-  const { activeProvider, isLoading: isLoadingProvider } = useProviderPreference();
   
+  const [selectedProvider, setSelectedProvider] = useState<AIProvider>(agent?.provider || "ollama");
   const [models, setModels] = useState<AIModel[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [modelError, setModelError] = useState<string | null>(null);
-  const [modelMismatchWarning, setModelMismatchWarning] = useState<string | null>(null);
+  const [selectedCombinationId, setSelectedCombinationId] = useState<string>('');
+  const [openRouterFreeOnly, setOpenRouterFreeOnly] = useState(true);
 
   const form = useForm<AgentInput>({
     resolver: zodResolver(AgentSchema.omit({ id: true, createdAt: true, updatedAt: true })),
@@ -60,46 +84,45 @@ export function AgentFormDialogContent({
       name: '',
       description: '',
       persona: '',
+      provider: 'ollama',
       modelId: '',
-      apiKeyId: undefined, // Optional - not all providers need API key
-      temperature: 0.7,
-      maxTokens: 2000,
+      apiKeyId: undefined,
     },
   });
 
-  // Fetch models when component mounts or provider changes
+  // Load models when provider changes
   useEffect(() => {
-    if (!activeProvider) return;
-
     const loadModels = async () => {
       setIsLoadingModels(true);
       setModelError(null);
-
+      
       try {
-        // Get API key for active provider
-        let apiKey: string | undefined;
-        if (activeProvider.apiKeyId) {
-          const key = apiKeys.find((k) => k.id === activeProvider.apiKeyId);
-          apiKey = key?.key;
-        }
-
-        const fetchedModels = await fetchModelsByProvider(activeProvider.provider, apiKey);
-
-        if (fetchedModels.length === 0) {
-          if (activeProvider.provider === 'ollama') {
-            setModelError('Ollama not running. Please start Ollama to see available models.');
-          } else if (!apiKey && AI_PROVIDERS[activeProvider.provider]?.requiresAPIKey) {
-            // Only show error if API key is REQUIRED but not provided
-            setModelError(`API key required for ${AI_PROVIDERS[activeProvider.provider].name}`);
+        let fetchedModels: AIModel[] = [];
+        
+        if (selectedProvider === "ollama") {
+          fetchedModels = await fetchOllamaModels();
+        } else if (selectedProvider === "openrouter") {
+          const apiKey = apiKeys.find(k => k.provider === "openrouter" && k.isActive)?.key;
+          if (apiKey) {
+            fetchedModels = await fetchOpenRouterModels(apiKey, { freeOnly: openRouterFreeOnly });
           } else {
-            setModelError('No models available');
+            setModelError("Please add an OpenRouter API key in Settings");
           }
+        } else if (selectedProvider === "llm7") {
+          const apiKey = apiKeys.find(k => k.provider === "llm7" && k.isActive)?.key;
+          fetchedModels = await fetchLLM7Models(apiKey);
         }
-
+        
         setModels(fetchedModels);
+        
+        // Reset model selection if current model is not available in new provider
+        const currentModelId = form.getValues("modelId");
+        if (currentModelId && !fetchedModels.find(m => m.id === currentModelId)) {
+          form.setValue("modelId", "");
+        }
       } catch (error) {
-        console.error('Error loading models:', error);
-        setModelError('Failed to load models');
+        console.error("Error loading models:", error);
+        setModelError("Failed to load models");
         setModels([]);
       } finally {
         setIsLoadingModels(false);
@@ -107,151 +130,258 @@ export function AgentFormDialogContent({
     };
 
     loadModels();
-    
-    // Set apiKeyId in form if provider has one
-    if (activeProvider.apiKeyId) {
-      form.setValue('apiKeyId', activeProvider.apiKeyId);
+  }, [selectedProvider, apiKeys, form, openRouterFreeOnly]);
+
+  useEffect(() => {
+    if (!agentCombinations || agentCombinations.length === 0) {
+      setSelectedCombinationId('');
+      return;
     }
 
-    // Check if agent's model matches current provider
-    if (agent && agent.modelId) {
-      const agentModel = models.find(m => m.id === agent.modelId);
-      if (!agentModel && models.length > 0) {
-        setModelMismatchWarning(
-          `Warning: "${agent.modelId}" is not available in ${AI_PROVIDERS[activeProvider.provider].name}. Please select a new model.`
-        );
-      } else {
-        setModelMismatchWarning(null);
-      }
-    }
-  }, [activeProvider, apiKeys, form, agent, models]);
+    setSelectedCombinationId((prev) => prev || agentCombinations[0]?.id || '');
+  }, [agentCombinations]);
 
-  const handleSubmit = (data: AgentInput) => {
-    onSubmit(data);
+  const handleProviderChange = (provider: AIProvider) => {
+    setSelectedProvider(provider);
+    form.setValue("provider", provider);
+    form.setValue("modelId", ""); // Reset model when provider changes
+    form.setValue("apiKeyId", ""); // Reset API key when provider changes
   };
 
-  // Show loading state while provider preference is loading
-  if (isLoadingProvider) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  const handleSubmit = (data: AgentInput) => {
+    // For aggregator, only submit provider, model, and apiKey
+    if (agent?.isAggregator) {
+      const aggregatorData: AgentInput = {
+        name: agent.name, // Keep existing name
+        description: agent.description || "", // Keep existing description
+        persona: agent.persona, // Keep existing persona
+        provider: data.provider,
+        modelId: data.modelId,
+        apiKeyId: data.apiKeyId,
+      };
+      onSubmit(aggregatorData);
+    } else {
+      onSubmit(data);
+    }
+  };
 
-  // Show error if no provider is configured
-  if (!activeProvider) {
-    return (
-      <Alert>
-        <Settings2 className="h-4 w-4" />
-        <AlertDescription>
-          No AI provider configured. Please configure a provider in Settings first.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-
-  const providerConfig = AI_PROVIDERS[activeProvider.provider];
+  // Get available API keys for selected provider
+  const providerApiKeys = apiKeys.filter(k => k.provider === selectedProvider && k.isActive);
+  const providerInfo = PROVIDER_INFO[selectedProvider];
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-6">
-        {/* Basic Information */}
+        {agentCombinations &&
+          agentCombinations.length > 0 &&
+          !agent &&
+          onApplyCombination && (
+            <div className="space-y-3 rounded-lg border border-dashed border-border/60 bg-muted/30 p-4">
+              <div>
+                <h3 className="text-sm font-medium">Import a saved agent combination</h3>
+                <p className="text-xs text-muted-foreground">
+                  Apply a preset selection of agents to this chat without recreating them.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Select
+                  value={selectedCombinationId}
+                  onValueChange={setSelectedCombinationId}
+                >
+                  <SelectTrigger className="sm:w-64">
+                    <SelectValue placeholder="Choose a combination" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {agentCombinations.map((combination) => (
+                      <SelectItem key={combination.id} value={combination.id}>
+                        {combination.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={!selectedCombinationId}
+                  onClick={() => {
+                    const combination = agentCombinations.find(
+                      (item) => item.id === selectedCombinationId
+                    );
+                    if (combination) {
+                      onApplyCombination(combination);
+                    }
+                  }}
+                >
+                  Apply Combination
+                </Button>
+              </div>
+            </div>
+          )}
+
+        {/* Aggregator Notice */}
+        {agent?.isAggregator && (
+          <div className="rounded-lg bg-primary/10 border border-primary/20 p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🤖</span>
+              <p className="text-sm font-semibold text-primary">System Aggregator Agent</p>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              This is the system aggregator that synthesizes responses from multiple agents. 
+              Its name, description, and persona are fixed and optimized for aggregation. 
+              You can only configure the <strong>provider</strong>, <strong>model</strong>, 
+              and <strong>API key</strong> for this agent.
+            </p>
+          </div>
+        )}
+
+        {/* Basic Information - Hide for aggregator */}
+        {!agent?.isAggregator && (
+          <div className="space-y-4">
+            <div>
+              <h3 className="text-lg font-medium">Basic Information</h3>
+              <p className="text-sm text-muted-foreground">
+                Define your agent&apos;s identity and purpose
+              </p>
+            </div>
+
+            <FormField
+              control={form.control}
+              name="name"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Name</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g., Senior Developer" {...field} />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name="description"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Description (Optional)</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder="e.g., Expert in TypeScript and React"
+                      {...field}
+                      value={field.value || ''}
+                    />
+                  </FormControl>
+                  <FormDescription>A brief description of the agent&apos;s role</FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        )}
+
+        {/* Persona - Hide for aggregator */}
+        {!agent?.isAggregator && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-medium">Persona & Instructions (Optional)</h3>
+                <p className="text-sm text-muted-foreground">
+                  Define how your agent should behave and respond
+                </p>
+              </div>
+              <PersonaSelector
+                onSelect={(persona) => {
+                  form.setValue('persona', persona);
+                }}
+              />
+            </div>
+
+            <FormField
+              control={form.control}
+              name="persona"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>System Prompt / Persona (Optional)</FormLabel>
+                  <FormControl>
+                    <Textarea
+                      placeholder="You are a helpful AI assistant..."
+                      className="min-h-32 resize-y"
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    The system prompt that defines your agent&apos;s behavior (optional)
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+        )}
+
+        {/* Model Selection */}
         <div className="space-y-4">
           <div>
-            <h3 className="text-lg font-medium">Basic Information</h3>
+            <h3 className="text-lg font-medium">Provider & Model Configuration</h3>
             <p className="text-sm text-muted-foreground">
-              Define your agent&apos;s identity and purpose
+              Choose your AI provider and model
             </p>
           </div>
 
+          {/* Provider Selection */}
           <FormField
             control={form.control}
-            name="name"
+            name="provider"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Name</FormLabel>
-                <FormControl>
-                  <Input placeholder="e.g., Senior Developer" {...field} />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name="description"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Description (Optional)</FormLabel>
-                <FormControl>
-                  <Input
-                    placeholder="e.g., Expert in TypeScript and React"
-                    {...field}
-                    value={field.value || ''}
-                  />
-                </FormControl>
-                <FormDescription>A brief description of the agent&apos;s role</FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-
-        {/* Persona */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="text-lg font-medium">Persona & Instructions</h3>
-              <p className="text-sm text-muted-foreground">
-                Define how your agent should behave and respond
-              </p>
-            </div>
-            <PersonaSelector
-              onSelect={(persona, temperature, maxTokens) => {
-                form.setValue('persona', persona);
-                if (temperature !== undefined) {
-                  form.setValue('temperature', temperature);
-                }
-                if (maxTokens !== undefined) {
-                  form.setValue('maxTokens', maxTokens);
-                }
-              }}
-            />
-          </div>
-
-          <FormField
-            control={form.control}
-            name="persona"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>System Prompt / Persona</FormLabel>
-                <FormControl>
-                  <Textarea
-                    placeholder="You are a helpful AI assistant..."
-                    className="min-h-32 resize-y"
-                    {...field}
-                  />
-                </FormControl>
+                <FormLabel>AI Provider</FormLabel>
+                <Select onValueChange={handleProviderChange} value={field.value}>
+                  <FormControl>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a provider" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {(Object.keys(PROVIDER_INFO) as AIProvider[]).map((provider) => {
+                      const info = PROVIDER_INFO[provider];
+                      const Icon = info.icon;
+                      return (
+                        <SelectItem key={provider} value={provider}>
+                          <div className="flex items-center gap-2">
+                            <Icon className="h-4 w-4" />
+                            <span>{info.name}</span>
+                            <span className="text-muted-foreground text-xs">- {info.description}</span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
                 <FormDescription>
-                  The system prompt that defines your agent&apos;s behavior
+                  Choose the AI provider for this agent
                 </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
           />
-        </div>
 
-        {/* Model Selection */}
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-lg font-medium">Model Selection</h3>
-            <p className="text-sm text-muted-foreground">
-              Using {providerConfig.name} provider
-            </p>
-          </div>
+          {selectedProvider === 'openrouter' && (
+            <div className="flex flex-col gap-2 rounded-lg border border-border/60 bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-sm font-medium">Show free OpenRouter models only</h4>
+                <p className="text-xs text-muted-foreground">
+                  Toggle off to display the full catalog, including paid models.
+                </p>
+              </div>
+              <Switch
+                checked={openRouterFreeOnly}
+                onCheckedChange={(checked) => setOpenRouterFreeOnly(checked)}
+                aria-label="Toggle free OpenRouter models"
+              />
+            </div>
+          )}
 
+          {/* Model Selection */}
           <FormField
             control={form.control}
             name="modelId"
@@ -265,7 +395,13 @@ export function AgentFormDialogContent({
                 >
                   <FormControl>
                     <SelectTrigger>
-                      <SelectValue placeholder={isLoadingModels ? 'Loading models...' : 'Select model'} />
+                      <SelectValue placeholder={
+                        isLoadingModels 
+                          ? 'Loading models...' 
+                          : models.length === 0 
+                          ? `No models available for ${providerInfo.name}` 
+                          : 'Select a model'
+                      } />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
@@ -298,86 +434,111 @@ export function AgentFormDialogContent({
                     <AlertDescription>{modelError}</AlertDescription>
                   </Alert>
                 )}
-                {modelMismatchWarning && (
-                  <Alert variant="default" className="border-orange-500 bg-orange-50 dark:bg-orange-950">
-                    <AlertCircle className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                    <AlertDescription className="text-orange-900 dark:text-orange-200">
-                      {modelMismatchWarning}
-                    </AlertDescription>
-                  </Alert>
-                )}
                 <FormDescription>
-                  Change provider in Settings to see different models
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
-
-        {/* Advanced Settings */}
-        <div className="space-y-4">
-          <div>
-            <h3 className="text-lg font-medium">Advanced Settings</h3>
-            <p className="text-sm text-muted-foreground">
-              Fine-tune the model&apos;s behavior
-            </p>
-          </div>
-
-          <FormField
-            control={form.control}
-            name="temperature"
-            render={({ field }) => (
-              <FormItem>
-                <div className="flex items-center justify-between">
-                  <FormLabel>Temperature</FormLabel>
-                  <span className="text-sm text-muted-foreground">
-                    {field.value?.toFixed(1) || '0.7'}
-                  </span>
-                </div>
-                <FormControl>
-                  <Slider
-                    min={0}
-                    max={2}
-                    step={0.1}
-                    value={[field.value || 0.7]}
-                    onValueChange={(value) => field.onChange(value[0])}
-                  />
-                </FormControl>
-                <FormDescription>
-                  Higher values make output more random, lower values more focused
+                  {isLoadingModels ? (
+                    <span className="flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Loading available models...
+                    </span>
+                  ) : (
+                    `Choose the AI model this agent will use`
+                  )}
                 </FormDescription>
                 <FormMessage />
               </FormItem>
             )}
           />
 
-          <FormField
-            control={form.control}
-            name="maxTokens"
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Max Tokens</FormLabel>
-                <FormControl>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={100000}
-                    {...field}
-                    onChange={(e) => field.onChange(parseInt(e.target.value))}
-                    value={field.value || 2000}
-                  />
-                </FormControl>
-                <FormDescription>Maximum length of the response</FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
+          {/* API Key Selection - Only for providers that need it */}
+          {providerInfo.requiresApiKey ? (
+            <FormField
+              control={form.control}
+              name="apiKeyId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>API Key</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder={
+                          providerApiKeys.length === 0 
+                            ? `No API keys configured for ${providerInfo.name}` 
+                            : "Select an API key"
+                        } />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {providerApiKeys.map((key) => (
+                        <SelectItem key={key.id} value={key.id}>
+                          {key.name}
+                          {key.lastUsed && (
+                            <span className="text-xs text-muted-foreground ml-2">
+                              (Last used: {new Date(key.lastUsed).toLocaleDateString()})
+                            </span>
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    {providerApiKeys.length === 0 ? (
+                      <span className="text-yellow-600">
+                        Please add an API key for {providerInfo.name} in Settings
+                      </span>
+                    ) : (
+                      `Select the API key to use for this agent`
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          ) : (
+            <FormField
+              control={form.control}
+              name="apiKeyId"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>API Key (Optional)</FormLabel>
+                  <Select 
+                    onValueChange={(value) => {
+                      // Convert "none" back to undefined for the form
+                      field.onChange(value === "none" ? undefined : value);
+                    }} 
+                    value={field.value || "none"}
+                  >
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder={
+                          providerApiKeys.length === 0 
+                            ? `No API keys configured (optional for ${providerInfo.name})` 
+                            : "Select an API key (optional)"
+                        } />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="none">No API Key</SelectItem>
+                      {providerApiKeys.map((key) => (
+                        <SelectItem key={key.id} value={key.id}>
+                          {key.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    API key is optional for {providerInfo.name}
+                    {selectedProvider === "llm7" && " (may provide higher rate limits)"}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
         </div>
 
         {/* Submit and Delete Buttons */}
         <div className="flex justify-between gap-2 pt-4 border-t">
-          {agent && onDelete && (
+          {agent && onDelete && !agent.isAggregator && (
             <Button 
               type="button"
               variant="destructive"

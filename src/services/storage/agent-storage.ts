@@ -152,6 +152,6 @@ export async function searchAgents(query: string): Promise<Agent[]> {
   return allAgents.filter((agent: Agent) => 
     agent.name.toLowerCase().includes(lowerQuery) ||
     agent.description?.toLowerCase().includes(lowerQuery) ||
-    agent.persona.toLowerCase().includes(lowerQuery)
+    agent.persona?.toLowerCase().includes(lowerQuery)
   );
 }

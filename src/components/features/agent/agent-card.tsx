@@ -1,10 +1,12 @@
 /**
  * Agent Card Component
  * Displays an agent in card format with actions
+ * Memoized for performance optimization
  */
 
 "use client";
 
+import { memo } from "react";
 import { Agent } from "@/types";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,8 +18,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
-import { MoreVertical, Edit, Copy, Trash2, Download, Brain, Thermometer, Hash } from "lucide-react";
-import { DEFAULT_MODELS } from "@/constants";
+import { MoreVertical, Edit, Copy, Trash2, Download, Brain, Server, Globe, Zap } from "lucide-react";
+
+const PROVIDER_ICONS = {
+  ollama: Server,
+  openrouter: Globe,
+  llm7: Zap,
+} as const;
 
 interface AgentCardProps {
   agent: Agent;
@@ -28,7 +35,7 @@ interface AgentCardProps {
   onClick?: (agent: Agent) => void;
 }
 
-export function AgentCard({
+export const AgentCard = memo(function AgentCard({
   agent,
   onEdit,
   onDelete,
@@ -36,7 +43,7 @@ export function AgentCard({
   onExport,
   onClick,
 }: AgentCardProps) {
-  const model = DEFAULT_MODELS.find((m) => m.id === agent.modelId);
+  const ProviderIcon = PROVIDER_ICONS[agent.provider];
 
   const handleCardClick = () => {
     if (onClick) {
@@ -97,7 +104,7 @@ export function AgentCard({
                   Export
                 </DropdownMenuItem>
               )}
-              {onDelete && (
+              {onDelete && !agent.isAggregator && (
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -118,35 +125,44 @@ export function AgentCard({
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {/* Model Badge */}
-          {model && (
+          {/* Aggregator Badge */}
+          {agent.isAggregator && (
             <div className="flex items-center gap-2">
-              <Brain className="text-muted-foreground h-4 w-4" />
-              <Badge variant="secondary" className="text-xs">
-                {model.displayName}
+              <Badge variant="default" className="bg-primary text-xs">
+                🤖 System Aggregator
               </Badge>
-              <span className="text-muted-foreground text-xs">({model.provider})</span>
+              <span className="text-xs text-muted-foreground">Cannot be deleted</span>
             </div>
           )}
 
-          {/* Parameters */}
-          <div className="text-muted-foreground flex items-center gap-4 text-xs">
-            <div className="flex items-center gap-1">
-              <Thermometer className="h-3 w-3" />
-              <span>Temp: {agent.temperature?.toFixed(1) || "0.7"}</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Hash className="h-3 w-3" />
-              <span>Tokens: {agent.maxTokens || "2048"}</span>
-            </div>
+          {/* Provider & Model Info */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <ProviderIcon className="text-muted-foreground h-4 w-4" />
+            <Badge variant="secondary" className="text-xs">
+              {agent.provider.toUpperCase()}
+            </Badge>
+            <Brain className="text-muted-foreground h-4 w-4 ml-2" />
+            <span className="text-muted-foreground text-xs">{agent.modelId}</span>
           </div>
 
-          {/* Persona Preview */}
-          <div className="mt-2">
-            <p className="text-muted-foreground bg-muted line-clamp-3 rounded p-2 font-mono text-xs">
-              {agent.persona}
-            </p>
-          </div>
+          {/* Persona Preview - hide for aggregator */}
+          {agent.persona && !agent.isAggregator && (
+            <div className="mt-2">
+              <p className="text-muted-foreground bg-muted line-clamp-3 rounded p-2 font-mono text-xs">
+                {agent.persona}
+              </p>
+            </div>
+          )}
+          
+          {/* Aggregator Info */}
+          {agent.isAggregator && (
+            <div className="mt-2">
+              <p className="text-xs text-muted-foreground bg-muted/50 rounded p-2">
+                ✨ This agent synthesizes responses from multiple agents into coherent answers.
+                Configure in Settings → Aggregator.
+              </p>
+            </div>
+          )}
 
           {/* Timestamps */}
           <div className="text-muted-foreground border-t pt-2 text-xs">
@@ -159,4 +175,4 @@ export function AgentCard({
       </CardContent>
     </Card>
   );
-}
+});
