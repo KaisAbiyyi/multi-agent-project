@@ -1,5 +1,15 @@
 import Dexie, { type EntityTable } from 'dexie';
-import type { Agent, APIKey, Council, Conversation, Message, ProviderPreference, AgentCombination, AIProvider } from '@/types';
+import type {
+  Agent,
+  APIKey,
+  Council,
+  Conversation,
+  Message,
+  ProviderPreference,
+  AgentCombination,
+  Project,
+  AIProvider,
+} from '@/types';
 
 // Define the database schema
 class AegisDatabase extends Dexie {
@@ -7,6 +17,7 @@ class AegisDatabase extends Dexie {
   apiKeys!: EntityTable<APIKey, 'id'>;
   councils!: EntityTable<Council, 'id'>;
   agentCombinations!: EntityTable<AgentCombination, 'id'>;
+  projects!: EntityTable<Project, 'id'>;
   conversations!: EntityTable<Conversation, 'id'>;
   messages!: EntityTable<Message, 'id'>;
   providerPreferences!: EntityTable<ProviderPreference, 'id'>;
@@ -128,6 +139,29 @@ class AegisDatabase extends Dexie {
           console.log('[DB Migration v4] Updated existing aggregator agent');
         }
       });
+
+    // Version 5: Add compound index for efficient message pagination
+    this.version(5).stores({
+      agents: 'id, name, createdAt, updatedAt, modelId, provider, isAggregator',
+      apiKeys: 'id, provider, name, isActive, createdAt',
+      councils: 'id, name, createdAt, updatedAt',
+      agentCombinations: 'id, name, createdAt, updatedAt',
+      conversations: 'id, councilId, createdAt, updatedAt, isPinned',
+      messages: 'id, conversationId, role, timestamp, [conversationId+timestamp]',
+      providerPreferences: 'id, provider, isActive, createdAt, updatedAt',
+    });
+
+    // Version 6: Add projects table and projectId field to conversations
+    this.version(6).stores({
+      agents: 'id, name, createdAt, updatedAt, modelId, provider, isAggregator',
+      apiKeys: 'id, provider, name, isActive, createdAt',
+      councils: 'id, name, createdAt, updatedAt',
+      agentCombinations: 'id, name, createdAt, updatedAt',
+      projects: 'id, name, createdAt, updatedAt',
+      conversations: 'id, councilId, projectId, createdAt, updatedAt, isPinned',
+      messages: 'id, conversationId, role, timestamp, [conversationId+timestamp]',
+      providerPreferences: 'id, provider, isActive, createdAt, updatedAt',
+    });
   }
 }
 
@@ -144,7 +178,12 @@ export async function getAggregatorAgent(): Promise<Agent | undefined> {
  * Update aggregator agent's provider and model
  * Creates the aggregator if it doesn't exist
  */
-export async function updateAggregatorAgent(provider: AIProvider, modelId: string, apiKeyId?: string): Promise<Agent> {
+export async function updateAggregatorAgent(
+  provider: AIProvider,
+  modelId: string,
+  apiKeyId?: string,
+  contextWindow?: number
+): Promise<Agent> {
   const aggregator = await getAggregatorAgent();
   
   if (!aggregator) {
@@ -158,6 +197,7 @@ export async function updateAggregatorAgent(provider: AIProvider, modelId: strin
       modelId,
       apiKeyId,
       isAggregator: true,
+      ...(typeof contextWindow === 'number' ? { contextWindow } : {}),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -167,12 +207,26 @@ export async function updateAggregatorAgent(provider: AIProvider, modelId: strin
   }
 
   // Update existing aggregator
-  await db.agents.update(aggregator.id, {
-    provider,
-    modelId,
-    apiKeyId,
-    updatedAt: new Date().toISOString(),
-  });
+  await db.agents
+    .where('id')
+    .equals(aggregator.id)
+    .modify((record) => {
+      record.provider = provider;
+      record.modelId = modelId;
+      record.updatedAt = new Date().toISOString();
+
+      if (typeof apiKeyId === 'string') {
+        record.apiKeyId = apiKeyId;
+      } else {
+        delete record.apiKeyId;
+      }
+
+      if (typeof contextWindow === 'number' && Number.isFinite(contextWindow)) {
+        record.contextWindow = contextWindow;
+      } else {
+        delete record.contextWindow;
+      }
+    });
   
   // Return updated aggregator
   const updated = await getAggregatorAgent();
@@ -182,4 +236,3 @@ export async function updateAggregatorAgent(provider: AIProvider, modelId: strin
   
   return updated;
 }
-

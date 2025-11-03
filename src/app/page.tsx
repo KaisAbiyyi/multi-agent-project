@@ -17,6 +17,15 @@ export const metadata: Metadata = {
   ],
 };
 
-export default function HomePage() {
-  return <ChatContainer />;
+interface HomePageProps {
+  searchParams: Promise<{
+    projectId?: string;
+  }>;
+}
+
+export default async function HomePage({ searchParams }: HomePageProps) {
+  const resolvedSearchParams = await searchParams;
+  const initialProjectId = resolvedSearchParams?.projectId;
+
+  return <ChatContainer initialProjectId={initialProjectId} />;
 }

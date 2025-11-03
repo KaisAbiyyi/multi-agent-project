@@ -1,4 +1,9 @@
 import type { AIProvider, AIModel } from '@/types';
+import {
+  coerceContextWindow,
+  OLLAMA_DEFAULT_CONTEXT_WINDOW,
+  OLLAMA_MAX_CONTEXT_WINDOW,
+} from '@/lib/context-window';
 
 interface FetchModelOptions {
   freeOnly?: boolean;
@@ -21,13 +26,31 @@ export async function fetchOllamaModels(): Promise<AIModel[]> {
     const models = data.models || [];
     console.log('[Ollama Models] Found models:', models.length);
 
-    return models.map((model: { name: string; details?: { parameter_size?: number } }) => ({
-      id: model.name,
-      provider: 'ollama' as AIProvider,
-      name: model.name,
-      displayName: model.name,
-      contextWindow: model.details?.parameter_size || 4096,
-    }));
+    return models.map(
+      (model: {
+        name: string;
+        details?: { parameter_size?: number | string; context_length?: number | string };
+      }) => {
+        const declaredContext = coerceContextWindow(model.details?.context_length);
+        const maxContext = declaredContext
+          ? Math.min(
+              OLLAMA_MAX_CONTEXT_WINDOW,
+              Math.max(declaredContext, OLLAMA_DEFAULT_CONTEXT_WINDOW)
+            )
+          : OLLAMA_MAX_CONTEXT_WINDOW;
+
+        const defaultContext = Math.min(maxContext, OLLAMA_DEFAULT_CONTEXT_WINDOW);
+
+        return {
+          id: model.name,
+          provider: 'ollama' as AIProvider,
+          name: model.name,
+          displayName: model.name,
+          contextWindow: defaultContext,
+          maxContextWindow: maxContext,
+        };
+      }
+    );
   } catch (error) {
     console.error('[Ollama Models] Error fetching models:', error);
     console.log('[Ollama Models] Make sure Ollama is running at http://localhost:11434');
@@ -81,7 +104,8 @@ export async function fetchLLM7Models(apiKey?: string): Promise<AIModel[]> {
       provider: 'llm7' as AIProvider,
       name: model.id,
       displayName: model.id,
-      contextWindow: 4096, // Default context window
+      contextWindow: OLLAMA_DEFAULT_CONTEXT_WINDOW, // Default context window for LLM7 (fallback)
+      maxContextWindow: OLLAMA_DEFAULT_CONTEXT_WINDOW,
     }));
     
     console.log('[LLM7 Models] Mapped models:', mappedModels);
@@ -153,6 +177,7 @@ export async function fetchOpenRouterModels(apiKey?: string, options: FetchModel
       name: model.id,
       displayName: model.name || model.id,
       contextWindow: model.context_length || 4096,
+      maxContextWindow: model.context_length || 4096,
       costPer1kTokens: model.pricing ? {
         input: parseFloat(model.pricing.prompt) * 1000,
         output: parseFloat(model.pricing.completion) * 1000,

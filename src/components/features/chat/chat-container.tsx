@@ -1,5 +1,6 @@
 "use client";
 
+import Dexie from "dexie";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { v4 as uuidv4 } from "uuid";
@@ -59,6 +60,10 @@ import {
 import { SettingsDialog } from "@/components/features/settings/settings-dialog";
 import { AgentFormDialogContent } from "@/components/features/agent/agent-form-dialog-content";
 import { ChatHistory } from "@/components/features/chat/chat-history";
+import {
+  ProjectsSidebar,
+  type ProjectsSidebarHandle,
+} from "@/components/features/chat/projects-sidebar";
 import { SearchConversations } from "@/components/features/chat/search-conversations";
 import { AgentButton } from "@/components/features/chat/agent-button";
 import { useToast } from "@/hooks/use-toast";
@@ -91,6 +96,8 @@ const MAX_AGENTS_PER_CONVERSATION = 4;
 const RATE_LIMIT_DELAY_MS = 1500;
 const RATE_LIMIT_PROVIDERS = new Set<AIProvider>(["openrouter", "llm7"]);
 const SHOW_DELIBERATION_STORAGE_KEY = "aegis_show_chain_of_thought";
+const MESSAGE_PAGE_SIZE = 20;
+const SCROLL_TOP_THRESHOLD = 64;
 
 const DELIBERATION_STAGE_MESSAGES: Record<MessageStage, string> = {
   initial: FEATURE_FLAGS.ENABLE_DEBATE_MODE
@@ -103,6 +110,34 @@ const DELIBERATION_STAGE_MESSAGES: Record<MessageStage, string> = {
 };
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const sanitizeAgentResponseContent = (
+  content: string,
+  labels: Array<string | undefined>
+) => {
+  if (!content) {
+    return content;
+  }
+
+  let sanitized = content;
+  for (const rawLabel of labels) {
+    if (!rawLabel) {
+      continue;
+    }
+
+    const pattern = new RegExp(
+      `^(\\s*(?:Agent\\s+)?${escapeRegExp(rawLabel)}:\\s*)+`,
+      "i"
+    );
+
+    if (pattern.test(sanitized)) {
+      sanitized = sanitized.replace(pattern, "");
+      break;
+    }
+  }
+
+  return sanitized.replace(/^\s+/, "");
+};
 
 type StreamAgentResponseOptions = {
   agent: Agent;
@@ -135,12 +170,14 @@ interface ChatContainerProps {
   conversationId?: string;
   initialMessage?: string;
   initialSelectedAgentIds?: string[];
+  initialProjectId?: string;
 }
 
 export function ChatContainer({
   conversationId,
   initialMessage,
   initialSelectedAgentIds,
+  initialProjectId,
 }: ChatContainerProps) {
   const router = useRouter();
   const { agents, createAgent, updateAgent, deleteAgent } = useAgents();
@@ -167,12 +204,23 @@ export function ChatContainer({
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [isSavingCombination, setIsSavingCombination] = useState(false);
   const [conversationAgentIds, setConversationAgentIds] = useState<string[] | null>(null);
+  const [pendingProjectId, setPendingProjectId] = useState<string | null>(initialProjectId ?? null);
+
+  const projectsSidebarRef = useRef<ProjectsSidebarHandle>(null);
+
+  useEffect(() => {
+    setPendingProjectId(initialProjectId ?? null);
+  }, [initialProjectId]);
 
   // Chat state
   const [messages, setMessages] = useState<Message[]>([]);
   const [isSending, setIsSending] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageContainerRef = useRef<HTMLDivElement>(null);
+  const skipAutoScrollRef = useRef(false);
+  const oldestMessageTimestampRef = useRef<string | null>(null);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
   const initialMessageProcessed = useRef(false);
   const initialSelectionApplied = useRef(false);
   const conversationLoadedRef = useRef<string | null>(null);
@@ -192,6 +240,23 @@ export function ChatContainer({
   const initialDeliberationSynced = useRef(false);
   const aggregatorProgressMessageId = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pendingScrollBehaviorRef = useRef<ScrollBehavior | null>(null);
+
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      const container = messageContainerRef.current;
+      if (!container) {
+        return;
+      }
+
+      if (behavior === "auto") {
+        container.scrollTop = container.scrollHeight;
+      }
+
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    },
+    []
+  );
 
   const onDeliberationPhaseChange = useCallback(
     (stage: MessageStage | null) => {
@@ -338,22 +403,261 @@ export function ChatContainer({
     []
   );
 
-  const waitForMessages = useCallback(
-    async (id: string, maxAttempts = 8, delayMs = 200): Promise<Message[]> => {
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        const entries = await db.messages.where("conversationId").equals(id).sortBy("timestamp");
+  const fetchRecentMessages = useCallback(
+    async (id: string, limit = MESSAGE_PAGE_SIZE) => {
+      const desiredUserCount = Math.floor(limit / 2);
+      const desiredAssistantCount = limit - desiredUserCount;
+      const chunkSize = Math.max(limit * 4, limit + 1);
 
-        if (entries.length > 0) {
-          return entries;
+      const collected: Message[] = [];
+      let userCount = 0;
+      let assistantCount = 0;
+      let cursorTimestamp: string | null = null;
+      let completed = false;
+
+      while (!completed && (userCount < desiredUserCount || assistantCount < desiredAssistantCount)) {
+        const chunk = await db.messages
+          .where("[conversationId+timestamp]")
+          .between(
+            [id, Dexie.minKey],
+            [id, cursorTimestamp ?? Dexie.maxKey],
+            true,
+            cursorTimestamp ? false : true
+          )
+          .reverse()
+          .limit(chunkSize)
+          .toArray();
+
+        if (chunk.length === 0) {
+          completed = true;
+          break;
+        }
+
+        for (const message of chunk) {
+          collected.push(message);
+
+          if (message.role === "user" && userCount < desiredUserCount) {
+            userCount += 1;
+          } else if (
+            message.role === "assistant" &&
+            !message.isHidden &&
+            assistantCount < desiredAssistantCount
+          ) {
+            assistantCount += 1;
+          }
+
+          if (userCount >= desiredUserCount && assistantCount >= desiredAssistantCount) {
+            completed = true;
+            break;
+          }
+        }
+
+        if (!completed) {
+          if (chunk.length < chunkSize) {
+            completed = true;
+          } else {
+            const lastMessage = chunk[chunk.length - 1];
+            cursorTimestamp = lastMessage?.timestamp ?? null;
+            if (!cursorTimestamp) {
+              completed = true;
+            }
+          }
+        }
+      }
+
+      const seen = new Set<string>();
+      const uniqueDescending: Message[] = [];
+      for (const message of collected) {
+        if (seen.has(message.id)) {
+          continue;
+        }
+        seen.add(message.id);
+        uniqueDescending.push(message);
+      }
+
+      const ordered = [...uniqueDescending].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+      let selectedMessages = ordered;
+      if (ordered.length > limit) {
+        const selectedIds = new Set<string>();
+        let selectedUser = 0;
+        let selectedAssistant = 0;
+        let earliestSelectedTimestamp: string | null = null;
+
+        for (let index = ordered.length - 1; index >= 0; index--) {
+          const message = ordered[index];
+          let tookMessage = false;
+
+          if (message.role === "user" && selectedUser < desiredUserCount) {
+            selectedIds.add(message.id);
+            selectedUser += 1;
+            tookMessage = true;
+          } else if (
+            message.role === "assistant" &&
+            !message.isHidden &&
+            selectedAssistant < desiredAssistantCount
+          ) {
+            selectedIds.add(message.id);
+            selectedAssistant += 1;
+            tookMessage = true;
+          }
+
+          if (tookMessage) {
+            earliestSelectedTimestamp = message.timestamp;
+          }
+
+          if (selectedUser >= desiredUserCount && selectedAssistant >= desiredAssistantCount) {
+            break;
+          }
+        }
+
+        if (selectedIds.size > 0) {
+          const thresholdTimestamp =
+            earliestSelectedTimestamp ??
+            ordered.find((msg) => selectedIds.has(msg.id))?.timestamp ??
+            null;
+
+          selectedMessages = ordered.filter((message) => {
+            if (selectedIds.has(message.id)) {
+              return true;
+            }
+
+            if (!thresholdTimestamp) {
+              return false;
+            }
+
+            if (message.timestamp === thresholdTimestamp) {
+              return true;
+            }
+
+            if (message.timestamp < thresholdTimestamp) {
+              return false;
+            }
+
+            if (message.role === "assistant" && message.isHidden) {
+              return true;
+            }
+
+            if (message.role === "system") {
+              return true;
+            }
+
+            return false;
+          });
+        }
+      }
+
+      const finalMessages = selectedMessages;
+      const earliestTimestamp = finalMessages[0]?.timestamp;
+      let hasMore = false;
+
+      if (earliestTimestamp) {
+        const olderVisible = await db.messages
+          .where("[conversationId+timestamp]")
+          .between([id, Dexie.minKey], [id, earliestTimestamp], true, false)
+          .filter((msg) => {
+            if (msg.role === "user") {
+              return true;
+            }
+            if (msg.role === "assistant") {
+              return !msg.isHidden;
+            }
+            return false;
+          })
+          .first();
+
+        hasMore = Boolean(olderVisible);
+      }
+
+      return {
+        messages: finalMessages,
+        hasMore,
+      };
+    },
+    []
+  );
+
+  const waitForMessages = useCallback(
+    async (
+      id: string,
+      maxAttempts = 8,
+      delayMs = 200
+    ): Promise<{ messages: Message[]; hasMore: boolean }> => {
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const result = await fetchRecentMessages(id);
+        if (result.messages.length > 0) {
+          return result;
         }
 
         await delay(delayMs);
       }
 
-      return [];
+      return fetchRecentMessages(id);
     },
-    []
+    [fetchRecentMessages]
   );
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!conversationId || isLoadingOlderMessages || !hasMoreMessages) {
+      return;
+    }
+
+    const beforeTimestamp = oldestMessageTimestampRef.current;
+    if (!beforeTimestamp) {
+      setHasMoreMessages(false);
+      return;
+    }
+
+    setIsLoadingOlderMessages(true);
+    const container = messageContainerRef.current;
+    const previousScrollHeight = container?.scrollHeight ?? 0;
+    const previousScrollTop = container?.scrollTop ?? 0;
+
+    try {
+      const rawOlderMessages = await db.messages
+        .where("[conversationId+timestamp]")
+        .between(
+          [conversationId, Dexie.minKey],
+          [conversationId, beforeTimestamp],
+          true,
+          false
+        )
+        .reverse()
+        .limit(MESSAGE_PAGE_SIZE + 1)
+        .toArray();
+
+      const hasMore = rawOlderMessages.length > MESSAGE_PAGE_SIZE;
+      const trimmed = hasMore ? rawOlderMessages.slice(0, MESSAGE_PAGE_SIZE) : rawOlderMessages;
+      const olderMessages = trimmed.reverse();
+
+      if (olderMessages.length > 0) {
+        setMessages((current) => {
+          const existingIds = new Set(current.map((msg) => msg.id));
+          const deduped = olderMessages.filter((msg) => !existingIds.has(msg.id));
+          if (deduped.length === 0) {
+            return current;
+          }
+          skipAutoScrollRef.current = true;
+          const updated = [...deduped, ...current];
+          oldestMessageTimestampRef.current = updated[0]?.timestamp ?? null;
+          return updated;
+        });
+      }
+
+      setHasMoreMessages(hasMore);
+    } catch (error) {
+      console.error("[ChatContainer] Failed to load older messages:", error);
+    } finally {
+      requestAnimationFrame(() => {
+        const node = messageContainerRef.current;
+        if (node && previousScrollHeight > 0) {
+          const newScrollHeight = node.scrollHeight;
+          node.scrollTop = newScrollHeight - previousScrollHeight + previousScrollTop;
+        }
+      });
+      setIsLoadingOlderMessages(false);
+    }
+  }, [conversationId, hasMoreMessages, isLoadingOlderMessages]);
 
   useEffect(() => {
     initialSelectionApplied.current = false;
@@ -390,9 +694,25 @@ export function ChatContainer({
     }
   }, [selectedAgentIds.length]);
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when new messages arrive (unless we're prepending older ones)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (skipAutoScrollRef.current) {
+      skipAutoScrollRef.current = false;
+      return;
+    }
+
+    const behavior = pendingScrollBehaviorRef.current ?? "smooth";
+    pendingScrollBehaviorRef.current = null;
+
+    scrollToBottom(behavior);
+  }, [messages, scrollToBottom]);
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      oldestMessageTimestampRef.current = null;
+      return;
+    }
+    oldestMessageTimestampRef.current = messages[0]?.timestamp ?? null;
   }, [messages]);
 
   useEffect(() => {
@@ -404,7 +724,13 @@ export function ChatContainer({
     const handleScroll = () => {
       const atTop = container.scrollTop <= 16;
       const hasOverflow = container.scrollHeight > container.clientHeight + 8;
+      const nearTopForLoading = container.scrollTop <= SCROLL_TOP_THRESHOLD;
+
       setShowScrollToBottom(atTop && hasOverflow && messages.length > 0);
+
+      if (nearTopForLoading && hasMoreMessages && !isLoadingOlderMessages) {
+        void loadOlderMessages();
+      }
     };
 
     container.addEventListener("scroll", handleScroll, { passive: true });
@@ -413,7 +739,13 @@ export function ChatContainer({
     return () => {
       container.removeEventListener("scroll", handleScroll);
     };
-  }, [messages.length, showDeliberation]);
+  }, [
+    hasMoreMessages,
+    isLoadingOlderMessages,
+    loadOlderMessages,
+    messages.length,
+    showDeliberation,
+  ]);
 
   // Load conversation messages if conversationId exists
   useEffect(() => {
@@ -426,6 +758,9 @@ export function ChatContainer({
       if (conversationAgentIds !== null) {
         setConversationAgentIds(null);
       }
+      setHasMoreMessages(false);
+      setIsLoadingOlderMessages(false);
+      oldestMessageTimestampRef.current = null;
       conversationLoadedRef.current = null;
       return;
     }
@@ -447,16 +782,7 @@ export function ChatContainer({
         const loadedAgentIds = conversation?.agentIds ?? [];
         setConversationAgentIds(enforceAgentLimit(loadedAgentIds, false));
 
-        let fetchedMessages = await db.messages
-          .where("conversationId")
-          .equals(conversationId)
-          .sortBy("timestamp");
-
-        console.log(
-          "[ChatContainer] Messages loaded from DB:",
-          fetchedMessages.length,
-          fetchedMessages
-        );
+        let recentResult = await fetchRecentMessages(conversationId);
 
         if (conversation) {
           const createdAtTime = new Date(conversation.createdAt).getTime();
@@ -470,23 +796,31 @@ export function ChatContainer({
             createdAt: conversation.createdAt,
             updatedAt: conversation.updatedAt,
             shouldHaveHistory,
-            messageCount: fetchedMessages.length,
+            messageCount: recentResult.messages.length,
           });
 
-          if (shouldHaveHistory && fetchedMessages.length === 0) {
+          if (shouldHaveHistory && recentResult.messages.length === 0) {
             console.log("[ChatContainer] Waiting for messages to appear...");
-            fetchedMessages = await waitForMessages(conversationId);
-            console.log("[ChatContainer] Messages after waiting:", fetchedMessages.length);
+            recentResult = await waitForMessages(conversationId);
+            console.log(
+              "[ChatContainer] Messages after waiting:",
+              recentResult.messages.length
+            );
           }
         }
 
         if (!isMounted) return;
         console.log(
           "[ChatContainer] Setting messages in state:",
-          fetchedMessages.length,
-          fetchedMessages
+          recentResult.messages.length,
+          recentResult.messages
         );
-        setMessages(fetchedMessages);
+        pendingScrollBehaviorRef.current = "auto";
+        skipAutoScrollRef.current = false;
+        setHasMoreMessages(recentResult.hasMore);
+        setIsLoadingOlderMessages(false);
+        oldestMessageTimestampRef.current = recentResult.messages[0]?.timestamp ?? null;
+        setMessages(recentResult.messages);
         conversationLoadedRef.current = conversationId;
       } catch (error) {
         console.error("[ChatContainer] Error loading conversation:", error);
@@ -684,6 +1018,21 @@ export function ChatContainer({
           (chunk, done) => {
             if (done) {
               abortControllerRef.current = null;
+              const sanitizedContent = sanitizeAgentResponseContent(fullContent, [
+                agent.name,
+                resolvedAuthorLabel,
+              ]);
+
+              if (sanitizedContent !== fullContent && shouldDisplay) {
+                setMessages((prev) =>
+                  prev.map((msg) =>
+                    msg.id === messageId ? { ...msg, content: sanitizedContent } : msg
+                  )
+                );
+              }
+
+              fullContent = sanitizedContent;
+
               if (!conversationId) {
                 return;
               }
@@ -1428,6 +1777,9 @@ export function ChatContainer({
       if (selectedAgentIds.length > 0) {
         params.set("selectedAgents", selectedAgentIds.join(","));
       }
+      if (pendingProjectId) {
+        params.set("projectId", pendingProjectId);
+      }
 
       // Redirect immediately so the chat route can take over
       router.push(`/chat/${newConversationId}?${params.toString()}`);
@@ -1439,7 +1791,9 @@ export function ChatContainer({
           createdAt: now,
           updatedAt: now,
           agentIds: selectedAgentIds,
+          projectId: pendingProjectId ?? undefined,
         });
+        setPendingProjectId(null);
       } catch (error) {
         console.error("[ChatContainer] Failed to persist new conversation:", error);
         toast({
@@ -1459,6 +1813,7 @@ export function ChatContainer({
 
       const targetAgentIds = [...selectedAgentIds];
       const historyBeforePrompt = buildConversationHistory(messages);
+      const isFirstMessage = messages.length === 0;
 
       // Add user message to state immediately
       const userMessageId = uuidv4();
@@ -1479,10 +1834,14 @@ export function ChatContainer({
       try {
         await db.transaction("rw", db.messages, db.conversations, async () => {
           await db.messages.add(userMessage);
-          await db.conversations.update(conversationId, {
+          const conversationUpdates: Partial<Conversation> = {
             updatedAt: now,
             agentIds: targetAgentIds,
-          });
+          };
+          if (isFirstMessage) {
+            conversationUpdates.title = generateConversationTitle(sanitizedMessage);
+          }
+          await db.conversations.update(conversationId, conversationUpdates);
         });
       } catch (persistError) {
         console.error("[ChatContainer] Failed to persist user message:", persistError);
@@ -1553,6 +1912,23 @@ export function ChatContainer({
           </SidebarHeader>
 
           <SidebarContent>
+            <SidebarGroup>
+              <SidebarGroupLabel className="justify-between pr-0">
+                <span>Projects</span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  onClick={() => projectsSidebarRef.current?.openCreateProjectDialog()}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <ProjectsSidebar ref={projectsSidebarRef} />
+              </SidebarGroupContent>
+            </SidebarGroup>
+
             <SidebarGroup>
               <SidebarGroupLabel>Chat History</SidebarGroupLabel>
               <SidebarGroupContent>
@@ -1784,6 +2160,25 @@ export function ChatContainer({
               </div>
             ) : (
               <div className="mx-auto max-w-4xl space-y-6">
+                {hasMoreMessages && (
+                  <div className="flex justify-center py-2">
+                    {isLoadingOlderMessages ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          void loadOlderMessages();
+                        }}
+                        disabled={isLoadingOlderMessages}
+                      >
+                        Load earlier messages
+                      </Button>
+                    )}
+                  </div>
+                )}
                 {visibleMessages.map((message) => {
                   const agentName = message.agentId 
                     ? agents.find((a) => a.id === message.agentId)?.name 

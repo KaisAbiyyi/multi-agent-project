@@ -5,6 +5,7 @@ interface ChatPageProps {
   searchParams: Promise<{
     initialMessage?: string;
     selectedAgents?: string;
+    projectId?: string;
   }>;
 }
 
@@ -24,6 +25,7 @@ export default async function ChatPage({ params, searchParams }: ChatPageProps) 
       conversationId={resolvedParams.id}
       initialMessage={initialMessage}
       initialSelectedAgentIds={initialSelectedAgentIds}
+      initialProjectId={resolvedSearchParams?.projectId}
     />
   );
 }

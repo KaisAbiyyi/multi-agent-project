@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Agent, AIModel, AgentCombination, AIProvider } from '@/types';
@@ -30,6 +30,15 @@ import { fetchOllamaModels, fetchOpenRouterModels, fetchLLM7Models } from '@/ser
 import { useAPIKeys } from '@/hooks/use-api-keys';
 import { PersonaSelector } from './persona-selector';
 import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
+import {
+  MIN_CONTEXT_WINDOW,
+  getContextStep,
+  normalizeContextWindow,
+  coerceContextWindow,
+  OLLAMA_DEFAULT_CONTEXT_WINDOW,
+  OLLAMA_MAX_CONTEXT_WINDOW,
+} from '@/lib/context-window';
 
 const PROVIDER_INFO = {
   ollama: {
@@ -87,6 +96,7 @@ export function AgentFormDialogContent({
       provider: 'ollama',
       modelId: '',
       apiKeyId: undefined,
+      contextWindow: undefined,
     },
   });
 
@@ -146,6 +156,9 @@ export function AgentFormDialogContent({
     form.setValue("provider", provider);
     form.setValue("modelId", ""); // Reset model when provider changes
     form.setValue("apiKeyId", ""); // Reset API key when provider changes
+    if (provider !== "ollama") {
+      form.setValue("contextWindow", undefined);
+    }
   };
 
   const handleSubmit = (data: AgentInput) => {
@@ -158,6 +171,7 @@ export function AgentFormDialogContent({
         provider: data.provider,
         modelId: data.modelId,
         apiKeyId: data.apiKeyId,
+        contextWindow: data.provider === "ollama" ? data.contextWindow : undefined,
       };
       onSubmit(aggregatorData);
     } else {
@@ -168,6 +182,105 @@ export function AgentFormDialogContent({
   // Get available API keys for selected provider
   const providerApiKeys = apiKeys.filter(k => k.provider === selectedProvider && k.isActive);
   const providerInfo = PROVIDER_INFO[selectedProvider];
+
+  const watchModelId = form.watch("modelId");
+  const watchContextWindow = form.watch("contextWindow");
+
+  const selectedModel = useMemo(
+    () => models.find((model) => model.id === watchModelId),
+    [models, watchModelId]
+  );
+
+  const contextMax = useMemo(() => {
+    if (!selectedModel) {
+      return selectedProvider === "ollama" ? OLLAMA_MAX_CONTEXT_WINDOW : null;
+    }
+
+    const rawMaxSource =
+      selectedModel.maxContextWindow ?? selectedModel.contextWindow;
+
+    const coerced = coerceContextWindow(rawMaxSource);
+
+    if (!coerced) {
+      return selectedProvider === "ollama" ? OLLAMA_MAX_CONTEXT_WINDOW : null;
+    }
+
+    if (selectedProvider === "ollama") {
+      return Math.min(
+        OLLAMA_MAX_CONTEXT_WINDOW,
+        Math.max(coerced, OLLAMA_DEFAULT_CONTEXT_WINDOW)
+      );
+    }
+
+    return coerced;
+  }, [selectedModel, selectedProvider]);
+
+  const contextStep = useMemo(() => {
+    return contextMax ? getContextStep(contextMax) : getContextStep(MIN_CONTEXT_WINDOW);
+  }, [contextMax]);
+
+  const contextMin = useMemo(() => {
+    if (!contextMax) {
+      return MIN_CONTEXT_WINDOW;
+    }
+
+    const effectiveMin =
+      selectedProvider === "ollama"
+        ? Math.max(contextStep, OLLAMA_DEFAULT_CONTEXT_WINDOW)
+        : Math.max(contextStep, MIN_CONTEXT_WINDOW);
+
+    return Math.min(contextMax, effectiveMin);
+  }, [contextMax, contextStep, selectedProvider]);
+
+  useEffect(() => {
+    if (selectedProvider !== "ollama") {
+      form.setValue("contextWindow", undefined);
+      return;
+    }
+
+    if (!contextMax) {
+      return;
+    }
+
+    const current = coerceContextWindow(form.getValues("contextWindow"));
+    const defaultTarget =
+      selectedProvider === "ollama"
+        ? Math.min(
+            contextMax,
+            coerceContextWindow(selectedModel?.contextWindow) ?? OLLAMA_DEFAULT_CONTEXT_WINDOW
+          )
+        : coerceContextWindow(selectedModel?.contextWindow) ?? contextMax;
+    const normalized = normalizeContextWindow(
+      current ?? defaultTarget,
+      contextMax,
+      contextStep,
+      contextMin
+    );
+
+    if (current !== normalized) {
+      form.setValue("contextWindow", normalized);
+    }
+  }, [selectedProvider, selectedModel, contextMax, contextStep, contextMin, form, watchModelId]);
+
+  const sliderValue = useMemo(() => {
+    if (selectedProvider !== "ollama" || !contextMax) {
+      return null;
+    }
+
+    const fallback =
+      selectedProvider === "ollama"
+        ? Math.min(
+            contextMax,
+            coerceContextWindow(selectedModel?.contextWindow) ?? OLLAMA_DEFAULT_CONTEXT_WINDOW
+          )
+        : coerceContextWindow(selectedModel?.contextWindow) ?? contextMax;
+    return normalizeContextWindow(
+      coerceContextWindow(watchContextWindow) ?? fallback,
+      contextMax,
+      contextStep,
+      contextMin
+    );
+  }, [selectedProvider, selectedModel, contextMax, contextStep, contextMin, watchContextWindow]);
 
   return (
     <Form {...form}>
@@ -420,7 +533,7 @@ export function AgentFormDialogContent({
                           <div className="flex flex-col">
                             <span>{model.displayName}</span>
                             <span className="text-xs text-muted-foreground">
-                              {model.contextWindow.toLocaleString()} tokens
+                              Up to {(model.maxContextWindow ?? model.contextWindow).toLocaleString()} tokens
                             </span>
                           </div>
                         </SelectItem>
@@ -446,10 +559,51 @@ export function AgentFormDialogContent({
                 </FormDescription>
                 <FormMessage />
               </FormItem>
+          )}
+        />
+
+        {selectedProvider === 'ollama' && selectedModel && contextMax && sliderValue !== null && (
+          <FormField
+            control={form.control}
+            name="contextWindow"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Context Window</FormLabel>
+                <div className="flex items-center gap-4">
+                  <Slider
+                    min={contextMin}
+                    max={contextMax}
+                    step={contextStep}
+                    value={[sliderValue]}
+                    onValueChange={(value) => {
+                      const rawValue = Array.isArray(value) ? value[0] : value;
+                      if (typeof rawValue !== "number" || Number.isNaN(rawValue)) {
+                        return;
+                      }
+
+                      const normalized = normalizeContextWindow(
+                        rawValue,
+                        contextMax,
+                        contextStep,
+                        contextMin
+                      );
+                      field.onChange(normalized);
+                    }}
+                  />
+                  <span className="w-20 text-right text-sm font-medium">
+                    {sliderValue.toLocaleString()}
+                  </span>
+                </div>
+                <FormDescription>
+                  Model supports up to {contextMax.toLocaleString()} tokens. Tune the working memory for this agent.
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
             )}
           />
+        )}
 
-          {/* API Key Selection - Only for providers that need it */}
+        {/* API Key Selection - Only for providers that need it */}
           {providerInfo.requiresApiKey ? (
             <FormField
               control={form.control}

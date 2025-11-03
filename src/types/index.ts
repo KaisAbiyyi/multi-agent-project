@@ -31,6 +31,7 @@ export interface AIModel {
   name: string; // Model name (e.g., "gpt-4", "claude-3-opus")
   displayName: string; // User-friendly display name
   contextWindow: number;
+  maxContextWindow?: number;
   costPer1kTokens?: {
     input: number;
     output: number;
@@ -49,6 +50,7 @@ export interface Agent {
   modelId: string; // Reference to AIModel
   apiKeyId?: string; // Reference to APIKey (optional - e.g., Ollama doesn't need it, LLM7 is optional)
   isAggregator?: boolean; // Special aggregator agent - cannot be deleted, persona is fixed
+  contextWindow?: number; // Optional override for provider context window
   createdAt: string;
   updatedAt: string;
 }
@@ -74,6 +76,17 @@ export interface AgentCombination {
   name: string;
   description?: string;
   agentIds: string[]; // Array of agent IDs in this combination
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Project or folder grouping for conversations
+ */
+export interface Project {
+  id: string;
+  name: string;
+  description?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -120,6 +133,7 @@ export interface Conversation {
   title: string;
   councilId?: string; // Optional reference to Council (for multi-agent)
   agentIds?: string[]; // Selected agents participating in the conversation
+  projectId?: string; // Optional reference to a project/folder
   messages?: Message[]; // Populated when loading conversation
   createdAt: string;
   updatedAt: string;

@@ -1,11 +1,12 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
+import { Slider } from '@/components/ui/slider';
 import { useToast } from '@/hooks/use-toast';
 import { getAggregatorAgent, updateAggregatorAgent } from '@/lib/db';
 import { fetchModelsByProvider } from '@/services/api/model-service';
@@ -13,6 +14,14 @@ import { useAPIKeys } from '@/hooks/use-api-keys';
 import type { Agent, AIProvider, AIModel } from '@/types';
 import { Bot, Loader2, Server, Globe, Zap } from 'lucide-react';
 import { AI_PROVIDERS } from '@/constants';
+import {
+  MIN_CONTEXT_WINDOW,
+  getContextStep,
+  normalizeContextWindow,
+  coerceContextWindow,
+  OLLAMA_DEFAULT_CONTEXT_WINDOW,
+  OLLAMA_MAX_CONTEXT_WINDOW,
+} from '@/lib/context-window';
 
 const PROVIDER_ICONS = {
   ollama: Server,
@@ -33,6 +42,7 @@ export function AggregatorConfiguration() {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [openRouterFreeOnly, setOpenRouterFreeOnly] = useState(true);
+  const [ollamaContextWindow, setOllamaContextWindow] = useState<number | null>(null);
 
   // Load aggregator agent
   useEffect(() => {
@@ -59,6 +69,12 @@ export function AggregatorConfiguration() {
 
     loadAggregator();
   }, [toast]);
+
+  useEffect(() => {
+    if (provider !== 'ollama') {
+      setOllamaContextWindow(null);
+    }
+  }, [provider]);
 
   // Load models when provider changes
   useEffect(() => {
@@ -90,6 +106,88 @@ export function AggregatorConfiguration() {
     loadModels();
   }, [provider, apiKeyId, apiKeys, modelId, openRouterFreeOnly]);
 
+  const selectedModel = useMemo(
+    () => models.find((model) => model.id === modelId),
+    [models, modelId]
+  );
+
+  const contextSliderMax = useMemo(() => {
+    if (!selectedModel) return null;
+    const rawMaxSource =
+      selectedModel.maxContextWindow ?? selectedModel.contextWindow;
+    const coerced = coerceContextWindow(rawMaxSource);
+    if (!coerced) {
+      return null;
+    }
+    if (provider === 'ollama') {
+      return Math.min(
+        OLLAMA_MAX_CONTEXT_WINDOW,
+        Math.max(coerced, OLLAMA_DEFAULT_CONTEXT_WINDOW)
+      );
+    }
+    return coerced;
+  }, [selectedModel, provider]);
+
+  const contextStep = useMemo(() => {
+    if (!contextSliderMax) {
+      return getContextStep(MIN_CONTEXT_WINDOW);
+    }
+    return getContextStep(contextSliderMax);
+  }, [contextSliderMax]);
+
+  const contextSliderMin = useMemo(() => {
+    if (!contextSliderMax) {
+      return MIN_CONTEXT_WINDOW;
+    }
+    const effectiveMin =
+      provider === 'ollama'
+        ? Math.max(contextStep, OLLAMA_DEFAULT_CONTEXT_WINDOW)
+        : Math.max(contextStep, MIN_CONTEXT_WINDOW);
+    return Math.min(contextSliderMax, effectiveMin);
+  }, [contextSliderMax, contextStep, provider]);
+
+  useEffect(() => {
+    if (provider !== 'ollama' || !selectedModel || !contextSliderMax) {
+      return;
+    }
+
+    const shouldPreserveUserValue =
+      typeof ollamaContextWindow === 'number' &&
+      aggregator?.provider === 'ollama' &&
+      aggregator.modelId === selectedModel.id;
+
+    const defaultBaseline =
+      provider === 'ollama'
+        ? Math.min(
+            contextSliderMax,
+            coerceContextWindow(selectedModel?.contextWindow) ?? OLLAMA_DEFAULT_CONTEXT_WINDOW
+          )
+        : coerceContextWindow(selectedModel?.contextWindow) ?? contextSliderMax;
+    const baseline = shouldPreserveUserValue
+      ? (ollamaContextWindow as number)
+      : defaultBaseline;
+    const normalized = normalizeContextWindow(
+      baseline,
+      contextSliderMax,
+      contextStep,
+      contextSliderMin
+    );
+
+    if (!shouldPreserveUserValue || ollamaContextWindow !== normalized) {
+      setOllamaContextWindow(normalized);
+    }
+  }, [
+    provider,
+    selectedModel,
+    aggregator?.provider,
+    aggregator?.modelId,
+    aggregator?.contextWindow,
+    contextSliderMax,
+    contextSliderMin,
+    contextStep,
+    ollamaContextWindow,
+  ]);
+
   const handleProviderChange = (newProvider: AIProvider) => {
     setProvider(newProvider);
     setModelId('');
@@ -97,6 +195,7 @@ export function AggregatorConfiguration() {
     if (newProvider === 'openrouter') {
       setOpenRouterFreeOnly(true);
     }
+    setOllamaContextWindow(null);
   };
 
   const handleSave = async () => {
@@ -120,14 +219,27 @@ export function AggregatorConfiguration() {
       return;
     }
 
+    const contextWindowToPersist =
+      provider === 'ollama' && selectedModel && sliderValue !== null
+        ? sliderValue
+        : undefined;
+
     setIsSaving(true);
     try {
       const isInitialSetup = !aggregator;
-      
-      const updatedAggregator = await updateAggregatorAgent(provider, modelId, apiKeyId);
-      
+
+      const updatedAggregator = await updateAggregatorAgent(
+        provider,
+        modelId,
+        apiKeyId,
+        contextWindowToPersist
+      );
+
       // Update local state with the returned aggregator
       setAggregator(updatedAggregator);
+
+      // Notify other components that agents have been updated
+      window.dispatchEvent(new CustomEvent('agentUpdated'));
 
       toast({
         title: 'Success',
@@ -147,13 +259,75 @@ export function AggregatorConfiguration() {
     }
   };
 
+  const sliderValue = useMemo(() => {
+    if (provider !== 'ollama' || !selectedModel || !contextSliderMax) {
+      return null;
+    }
+
+    if (typeof ollamaContextWindow === 'number') {
+      return ollamaContextWindow;
+    }
+
+    const defaultBaseline =
+      provider === 'ollama'
+        ? Math.min(
+            contextSliderMax,
+            coerceContextWindow(selectedModel?.contextWindow) ?? OLLAMA_DEFAULT_CONTEXT_WINDOW
+          )
+        : coerceContextWindow(selectedModel?.contextWindow) ?? contextSliderMax;
+    return normalizeContextWindow(
+      defaultBaseline,
+      contextSliderMax,
+      contextStep,
+      contextSliderMin
+    );
+  }, [
+    provider,
+    selectedModel,
+    contextSliderMax,
+    ollamaContextWindow,
+    contextStep,
+    contextSliderMin,
+  ]);
+
   const providerApiKeys = apiKeys.filter((key) => key.provider === provider && key.isActive);
-  const hasRequiredApiKey = AI_PROVIDERS[provider].requiresAPIKey ? apiKeyId : true;
-  const hasChanges = 
-    aggregator && 
-    (aggregator.provider !== provider || 
-     aggregator.modelId !== modelId || 
-     aggregator.apiKeyId !== apiKeyId);
+  const hasRequiredApiKey = AI_PROVIDERS[provider].requiresAPIKey ? Boolean(apiKeyId) : true;
+
+  const normalizedPendingContext =
+    provider === 'ollama' && selectedModel && contextSliderMax && sliderValue !== null
+      ? sliderValue
+      : null;
+
+  const normalizedCurrentContext = useMemo(() => {
+    if (aggregator?.provider !== 'ollama') {
+      return null;
+    }
+
+    const coerced = coerceContextWindow(aggregator.contextWindow);
+
+    if (
+      aggregator.modelId === modelId &&
+      provider === 'ollama' &&
+      contextSliderMax
+    ) {
+      return coerced ?? contextSliderMax;
+    }
+
+    return coerced ?? null;
+  }, [aggregator, modelId, provider, contextSliderMax]);
+
+  const hasChanges =
+    aggregator &&
+    (aggregator.provider !== provider ||
+      aggregator.modelId !== modelId ||
+      (aggregator.apiKeyId ?? null) !== (apiKeyId ?? null) ||
+      (provider === 'ollama' &&
+        aggregator.provider === 'ollama' &&
+        aggregator.modelId === modelId &&
+        selectedModel &&
+        contextSliderMax !== null &&
+        normalizedPendingContext !== null &&
+        normalizedCurrentContext !== normalizedPendingContext));
   
   // Determine if this is initial setup or update
   const isInitialSetup = !aggregator;
@@ -213,6 +387,17 @@ export function AggregatorConfiguration() {
               <span className="font-medium text-foreground">{AI_PROVIDERS[aggregator.provider].name}</span>
               <span>Model:</span>
               <span className="font-medium text-foreground">{aggregator.modelId}</span>
+              {aggregator.provider === 'ollama' && (
+                <>
+                  <span>Context window:</span>
+                  <span className="font-medium text-foreground">
+                    {(() => {
+                      const display = coerceContextWindow(aggregator.contextWindow);
+                      return display ? `${display.toLocaleString()} tokens` : 'Model default';
+                    })()}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -316,7 +501,15 @@ export function AggregatorConfiguration() {
               )}
               {models.map((model) => (
                 <SelectItem key={model.id} value={model.id}>
-                  {model.displayName}
+                  <div className="flex flex-col">
+                    <span>{model.displayName}</span>
+                    <span className="text-xs text-muted-foreground">
+                      Default {model.contextWindow.toLocaleString()} tokens
+                      {model.maxContextWindow && model.maxContextWindow !== model.contextWindow
+                        ? ` • Max ${model.maxContextWindow.toLocaleString()} tokens`
+                        : ''}
+                    </span>
+                  </div>
                 </SelectItem>
               ))}
             </SelectContent>
@@ -329,6 +522,43 @@ export function AggregatorConfiguration() {
               : `${models.length} model${models.length !== 1 ? 's' : ''} available`}
           </p>
         </div>
+
+        {provider === 'ollama' && selectedModel && contextSliderMax && sliderValue !== null && (
+          <div className="space-y-2">
+            <Label htmlFor="contextWindow">Context Window</Label>
+            <div className="flex items-center gap-4">
+              <Slider
+                id="contextWindow"
+                min={contextSliderMin}
+                max={contextSliderMax}
+                step={contextStep}
+                value={[sliderValue]}
+                onValueChange={(value) => {
+                  const rawValue = Array.isArray(value) ? value[0] : value;
+                  if (typeof rawValue !== 'number' || Number.isNaN(rawValue)) {
+                    return;
+                  }
+
+                  const nextValue = normalizeContextWindow(
+                    rawValue,
+                    contextSliderMax,
+                    contextStep,
+                    contextSliderMin
+                  );
+                  if (sliderValue !== nextValue) {
+                    setOllamaContextWindow(nextValue);
+                  }
+                }}
+              />
+              <span className="w-20 text-right text-sm font-medium">
+                {sliderValue.toLocaleString()}
+              </span>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Model supports up to {contextSliderMax.toLocaleString()} tokens. Adjust in common increments to suit your workload.
+            </p>
+          </div>
+        )}
 
         {/* Apply/Save Button */}
         <Button 

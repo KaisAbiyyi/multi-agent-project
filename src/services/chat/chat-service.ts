@@ -15,6 +15,7 @@ export interface SendMessageRequest {
   userMessage: string;
   agentIds: string[];
   enableRefinement?: boolean;
+  projectId?: string;
 }
 
 export interface SendMessageResult {
@@ -74,6 +75,7 @@ export async function sendMessage(
         title: generateConversationTitle(request.userMessage),
         agentIds: request.agentIds,
         messages: [userMessage, assistantMessage],
+        projectId: request.projectId,
       });
     }
 
@@ -100,6 +102,7 @@ async function createConversation(data: {
   title: string;
   agentIds: string[];
   messages: Message[];
+  projectId?: string;
 }): Promise<void> {
   console.log('[Chat Service] Creating new conversation:', data.id);
   
@@ -110,6 +113,7 @@ async function createConversation(data: {
     councilId: '', // Legacy field, keep empty for now
     messages: [],  // We'll store messages separately
     agentIds: data.agentIds,
+    projectId: data.projectId,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   });

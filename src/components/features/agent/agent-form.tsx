@@ -31,9 +31,18 @@ import {
 import { PersonaSelector } from "./persona-selector";
 import { Loader2, Server, Globe, Zap } from "lucide-react";
 import { useAPIKeys } from "@/hooks/use-api-keys";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { fetchOllamaModels, fetchOpenRouterModels, fetchLLM7Models } from "@/services/api/model-service";
 import { sanitizeInput } from "@/lib/security";
+import { Slider } from "@/components/ui/slider";
+import {
+  MIN_CONTEXT_WINDOW,
+  getContextStep,
+  normalizeContextWindow,
+  coerceContextWindow,
+  OLLAMA_DEFAULT_CONTEXT_WINDOW,
+  OLLAMA_MAX_CONTEXT_WINDOW,
+} from "@/lib/context-window";
 
 const PROVIDER_INFO = {
   ollama: {
@@ -79,6 +88,7 @@ export function AgentForm({ agent, onSubmit, onCancel, isSubmitting = false }: A
           provider: agent.provider,
           modelId: agent.modelId,
           apiKeyId: agent.apiKeyId,
+          contextWindow: agent.contextWindow,
         }
       : {
           name: "",
@@ -87,6 +97,7 @@ export function AgentForm({ agent, onSubmit, onCancel, isSubmitting = false }: A
           provider: "ollama",
           modelId: "",
           apiKeyId: "",
+          contextWindow: undefined,
         },
   });
 
@@ -136,6 +147,9 @@ export function AgentForm({ agent, onSubmit, onCancel, isSubmitting = false }: A
     form.setValue("provider", provider);
     form.setValue("modelId", ""); // Reset model when provider changes
     form.setValue("apiKeyId", ""); // Reset API key when provider changes
+    if (provider !== "ollama") {
+      form.setValue("contextWindow", undefined);
+    }
   };
 
   const handleSubmit = async (data: AgentInput) => {
@@ -147,6 +161,7 @@ export function AgentForm({ agent, onSubmit, onCancel, isSubmitting = false }: A
       provider: data.provider,
       modelId: data.modelId,
       apiKeyId: data.apiKeyId,
+      contextWindow: data.provider === "ollama" ? data.contextWindow : undefined,
     };
 
     // For aggregator, only submit provider, model, and apiKey
@@ -156,14 +171,112 @@ export function AgentForm({ agent, onSubmit, onCancel, isSubmitting = false }: A
         description: agent.description || "", // Keep existing description
         persona: agent.persona, // Keep existing persona
         provider: sanitizedData.provider,
-        modelId: sanitizedData.modelId,
-        apiKeyId: sanitizedData.apiKeyId,
-      };
+      modelId: sanitizedData.modelId,
+      apiKeyId: sanitizedData.apiKeyId,
+      contextWindow: sanitizedData.contextWindow,
+    };
       await onSubmit(aggregatorData);
     } else {
       await onSubmit(sanitizedData);
     }
   };
+
+  const watchModelId = form.watch("modelId");
+  const watchContextWindow = form.watch("contextWindow");
+
+  const selectedModel = useMemo(
+    () => availableModels.find((model) => model.id === watchModelId),
+    [availableModels, watchModelId]
+  );
+
+  const contextMax = useMemo(() => {
+    if (!selectedModel) {
+      return selectedProvider === "ollama" ? OLLAMA_MAX_CONTEXT_WINDOW : null;
+    }
+
+    const rawMaxSource = selectedModel.maxContextWindow ?? selectedModel.contextWindow;
+    const coerced = coerceContextWindow(rawMaxSource);
+
+    if (!coerced) {
+      return selectedProvider === "ollama" ? OLLAMA_MAX_CONTEXT_WINDOW : null;
+    }
+
+    if (selectedProvider === "ollama") {
+      return Math.min(
+        OLLAMA_MAX_CONTEXT_WINDOW,
+        Math.max(coerced, OLLAMA_DEFAULT_CONTEXT_WINDOW)
+      );
+    }
+
+    return coerced;
+  }, [selectedModel, selectedProvider]);
+
+  const contextStep = useMemo(() => {
+    return contextMax ? getContextStep(contextMax) : getContextStep(MIN_CONTEXT_WINDOW);
+  }, [contextMax]);
+
+  const contextMin = useMemo(() => {
+    if (!contextMax) {
+      return MIN_CONTEXT_WINDOW;
+    }
+
+    const effectiveMin =
+      selectedProvider === "ollama"
+        ? Math.max(contextStep, OLLAMA_DEFAULT_CONTEXT_WINDOW)
+        : Math.max(contextStep, MIN_CONTEXT_WINDOW);
+
+    return Math.min(contextMax, effectiveMin);
+  }, [contextMax, contextStep, selectedProvider]);
+
+  useEffect(() => {
+    if (selectedProvider !== "ollama") {
+      form.setValue("contextWindow", undefined);
+      return;
+    }
+
+    if (!contextMax) {
+      return;
+    }
+
+    const current = coerceContextWindow(form.getValues("contextWindow"));
+    const defaultTarget =
+      selectedProvider === "ollama"
+        ? Math.min(
+            contextMax,
+            coerceContextWindow(selectedModel?.contextWindow) ?? OLLAMA_DEFAULT_CONTEXT_WINDOW
+          )
+        : coerceContextWindow(selectedModel?.contextWindow) ?? contextMax;
+    const normalized = normalizeContextWindow(
+      current ?? defaultTarget,
+      contextMax,
+      contextStep,
+      contextMin
+    );
+
+    if (current !== normalized) {
+      form.setValue("contextWindow", normalized);
+    }
+  }, [selectedProvider, selectedModel, contextMax, contextStep, contextMin, form, watchModelId]);
+
+  const sliderValue = useMemo(() => {
+    if (selectedProvider !== "ollama" || !contextMax) {
+      return null;
+    }
+
+    const fallback =
+      selectedProvider === "ollama"
+        ? Math.min(
+            contextMax,
+            coerceContextWindow(selectedModel?.contextWindow) ?? OLLAMA_DEFAULT_CONTEXT_WINDOW
+          )
+        : coerceContextWindow(selectedModel?.contextWindow) ?? contextMax;
+    return normalizeContextWindow(
+      coerceContextWindow(watchContextWindow) ?? fallback,
+      contextMax,
+      contextStep,
+      contextMin
+    );
+  }, [selectedProvider, selectedModel, contextMax, contextStep, contextMin, watchContextWindow]);
 
   // Get available API keys for selected provider
   const providerApiKeys = apiKeys.filter(k => k.provider === selectedProvider && k.isActive);
@@ -333,7 +446,10 @@ export function AgentForm({ agent, onSubmit, onCancel, isSubmitting = false }: A
                           <span>{model.displayName}</span>
                           {model.contextWindow && (
                             <span className="text-xs text-muted-foreground">
-                              Context: {model.contextWindow.toLocaleString()} tokens
+                              Default {model.contextWindow.toLocaleString()} tokens
+                              {model.maxContextWindow && model.maxContextWindow !== model.contextWindow
+                                ? ` • Max ${model.maxContextWindow.toLocaleString()} tokens`
+                                : ""}
                             </span>
                           )}
                         </div>
@@ -355,6 +471,47 @@ export function AgentForm({ agent, onSubmit, onCancel, isSubmitting = false }: A
               </FormItem>
             )}
           />
+
+          {selectedProvider === "ollama" && selectedModel && contextMax && sliderValue !== null && (
+            <FormField
+              control={form.control}
+              name="contextWindow"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Context Window</FormLabel>
+                  <div className="flex items-center gap-4">
+                    <Slider
+                      min={contextMin}
+                      max={contextMax}
+                      step={contextStep}
+                      value={[sliderValue]}
+                      onValueChange={(value) => {
+                        const rawValue = Array.isArray(value) ? value[0] : value;
+                        if (typeof rawValue !== "number" || Number.isNaN(rawValue)) {
+                          return;
+                        }
+
+                        const normalized = normalizeContextWindow(
+                          rawValue,
+                          contextMax,
+                          contextStep,
+                          contextMin
+                        );
+                        field.onChange(normalized);
+                      }}
+                    />
+                    <span className="w-20 text-right text-sm font-medium">
+                      {sliderValue.toLocaleString()}
+                    </span>
+                  </div>
+                  <FormDescription>
+                    Model supports up to {contextMax.toLocaleString()} tokens. Adjust the context window to balance recall and performance.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          )}
 
           {/* API Key Selection - Only for providers that need it */}
           {providerInfo.requiresApiKey ? (

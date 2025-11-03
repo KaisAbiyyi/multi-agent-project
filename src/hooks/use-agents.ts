@@ -31,6 +31,19 @@ export function useAgents() {
     loadAgents();
   }, [loadAgents]);
 
+  // Listen for agent updates from other components (e.g., aggregator creation)
+  useEffect(() => {
+    const handleAgentUpdate = () => {
+      console.log('[useAgents] Agent update event received, reloading agents...');
+      loadAgents();
+    };
+
+    window.addEventListener('agentUpdated', handleAgentUpdate);
+    return () => {
+      window.removeEventListener('agentUpdated', handleAgentUpdate);
+    };
+  }, [loadAgents]);
+
   // Create a new agent
   const createAgent = useCallback(async (agentData: Omit<Agent, 'id' | 'createdAt' | 'updatedAt'>) => {
     console.log('[useAgents] Creating agent with data:', agentData);

@@ -8,19 +8,19 @@ This document outlines all necessary improvements and quality checks required to
 ## 🎯 Critical Path (Must Have for MVP)
 
 ### 1. Core Functionality
-- [ ] **Agent Creation & Management**
+- [x] **Agent Creation & Management**
   - [x] Verify all persona templates work correctly ✅ (Automated tests passed)
-  - [ ] Test agent creation with all providers (Ollama, OpenRouter, LLM7)
-  - [ ] Ensure agent editing updates correctly
-  - [ ] Verify agent deletion works (except aggregator)
-  - [ ] Test provider-per-agent configuration
+  - [x] Test agent creation with all providers (Ollama, OpenRouter, LLM7)
+  - [x] Ensure agent editing updates correctly
+  - [x] Verify agent deletion works (except aggregator)
+  - [x] Test provider-per-agent configuration
 
-- [ ] **Aggregator Setup**
-  - [ ] Test initial aggregator configuration flow
-  - [ ] Verify aggregator model switching works
-  - [ ] Test with free and paid OpenRouter models
-  - [ ] Ensure Ollama models load correctly
-  - [ ] Validate LLM7 integration
+- [x] **Aggregator Setup**
+  - [x] Test initial aggregator configuration flow
+  - [x] Verify aggregator model switching works
+  - [x] Test with free and paid OpenRouter models
+  - [x] Ensure Ollama models load correctly
+  - [x] Validate LLM7 integration
 
 - [ ] **Chat Functionality**
   - [ ] Single agent conversations work properly

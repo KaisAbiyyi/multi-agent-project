@@ -73,6 +73,7 @@ export const AgentSchema = z.object({
   modelId: z.string().min(1, "Model is required"),
   apiKeyId: z.string().optional(), // API key is optional (e.g., Ollama doesn't need it, LLM7 is optional)
   isAggregator: z.boolean().optional(), // Special aggregator agent flag
+  contextWindow: z.number().int().positive().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
