@@ -69,6 +69,7 @@ import { AgentButton } from "@/components/features/chat/agent-button";
 import { useToast } from "@/hooks/use-toast";
 import { callAIModelStreaming } from "@/services/api/ai-client";
 import type { ConversationHistoryEntry } from "@/services/api/ai-client";
+import { executeWebSearch } from "@/services/api/web-search";
 import { TextareaAutosize } from "@/components/ui/textarea-autosize";
 import { AI_PROVIDERS, FEATURE_FLAGS } from "@/constants";
 import { Switch } from "@/components/ui/switch";
@@ -91,13 +92,17 @@ import { useGlobalShortcuts } from "@/hooks/use-global-shortcuts";
 import { MessageItem } from "./message-item";
 import { sanitizeInput } from "@/lib/security";
 import { EmptyState } from "./empty-state";
+import { buildSearchQueries, detectWebNeed, formatSearchResults } from "@/lib/web-search";
+import type { WebSearchDetection, WebSearchResponse } from "@/types/web-search";
 
 const MAX_AGENTS_PER_CONVERSATION = 4;
 const RATE_LIMIT_DELAY_MS = 1500;
 const RATE_LIMIT_PROVIDERS = new Set<AIProvider>(["openrouter", "llm7"]);
 const SHOW_DELIBERATION_STORAGE_KEY = "aegis_show_chain_of_thought";
+const WEB_SEARCH_ENABLED_STORAGE_KEY = "aegis_web_search_enabled";
 const MESSAGE_PAGE_SIZE = 20;
 const SCROLL_TOP_THRESHOLD = 64;
+const WEB_SEARCH_PLACEHOLDER_CONTENT = "🔎 Web search enabled. Fetching the latest sources…";
 
 const DELIBERATION_STAGE_MESSAGES: Record<MessageStage, string> = {
   initial: FEATURE_FLAGS.ENABLE_DEBATE_MODE
@@ -137,6 +142,60 @@ const sanitizeAgentResponseContent = (
   }
 
   return sanitized.replace(/^\s+/, "");
+};
+
+const buildWebSearchSuccessContent = (
+  detection: WebSearchDetection,
+  results: WebSearchResponse
+): string => {
+  const parts: string[] = ["🔎 **Web Search**"];
+  if (detection.reason) {
+    parts.push(`> ${detection.reason}`);
+  }
+
+  const formattedResults = formatSearchResults(results);
+  if (formattedResults) {
+    parts.push("", formattedResults);
+  }
+
+  parts.push(
+    "",
+    "Review the sources below for the most recent details. Versions and availability may change without notice."
+  );
+
+  return parts.filter(Boolean).join("\n");
+};
+
+const buildWebSearchErrorContent = (
+  detection: WebSearchDetection,
+  errorMessage: string
+): string => {
+  const details = detection.reason ? ` (${detection.reason})` : "";
+  return [
+    "⚠️ **Web Search Temporarily Unavailable**",
+    `Unable to reach the live search service${details}.`,
+    `Technical details: ${errorMessage}`,
+    "The model will respond using internal knowledge and should encourage the user to verify with official sources."
+  ].join("\n\n");
+};
+
+const buildPromptWithSearchContext = (prompt: string, contextBlock: string): string => {
+  return `${prompt}
+
+Latest web context:
+${contextBlock}
+
+Instructions:
+- Use the context above when relevant.
+- Write the final answer in English unless the user explicitly asks for another language.
+- Remind the user to open the provided links when information is likely to change.`;
+};
+
+const buildPromptWithSearchError = (prompt: string, errorMessage: string): string => {
+  return `${prompt}
+
+Note: Web search is currently unavailable because ${errorMessage}.
+Answer using internal knowledge and politely suggest that the user confirm details on official sources for the latest updates.`;
 };
 
 type StreamAgentResponseOptions = {
@@ -230,6 +289,13 @@ export function ChatContainer({
       return true;
     }
     const stored = window.localStorage.getItem(SHOW_DELIBERATION_STORAGE_KEY);
+    return stored === null ? true : stored === "true";
+  });
+  const [webSearchEnabled, setWebSearchEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") {
+      return true;
+    }
+    const stored = window.localStorage.getItem(WEB_SEARCH_ENABLED_STORAGE_KEY);
     return stored === null ? true : stored === "true";
   });
   const [deliberationStatus, setDeliberationStatus] = useState<{
@@ -679,6 +745,12 @@ export function ChatContainer({
       window.localStorage.setItem(SHOW_DELIBERATION_STORAGE_KEY, String(showDeliberation));
     }
   }, [showDeliberation]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(WEB_SEARCH_ENABLED_STORAGE_KEY, String(webSearchEnabled));
+    }
+  }, [webSearchEnabled]);
 
   useEffect(() => {
     if (selectedAgentIds.length > 1 && !initialDeliberationSynced.current) {
@@ -1457,6 +1529,116 @@ export function ChatContainer({
     [agentById, streamAgentResponse, toast, conversationId]
   );
 
+  const runWebSearchFlow = useCallback(
+    async ({
+      conversationId: convoId,
+      prompt,
+      detection,
+      shouldRun,
+    }: {
+      conversationId: string;
+      prompt: string;
+      detection: WebSearchDetection;
+      shouldRun: boolean;
+    }): Promise<{ prompt: string }> => {
+      if (!shouldRun) {
+        return { prompt };
+      }
+
+      const messageId = uuidv4();
+      const placeholderTimestamp = new Date().toISOString();
+      const placeholderMessage: Message = {
+        id: messageId,
+        conversationId: convoId,
+        role: "system",
+        content: WEB_SEARCH_PLACEHOLDER_CONTENT,
+        initialContent: WEB_SEARCH_PLACEHOLDER_CONTENT,
+        timestamp: placeholderTimestamp,
+        authorLabel: "Web Search",
+      };
+
+      setMessages((prev) => [...prev, placeholderMessage]);
+
+      try {
+        await db.messages.add(placeholderMessage);
+      } catch (persistError) {
+        console.error("[ChatContainer] Failed to persist web search placeholder:", persistError);
+      }
+
+      try {
+        let queries = buildSearchQueries(prompt);
+        if (queries.length === 0) {
+          queries = [prompt];
+        }
+
+        const results = await executeWebSearch({ queries, topK: 3 });
+        const contextBlock = formatSearchResults(results);
+
+        const finalContent = buildWebSearchSuccessContent(detection, results);
+        const updatedTimestamp = new Date().toISOString();
+
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  content: finalContent,
+                  timestamp: updatedTimestamp,
+                }
+              : message
+          )
+        );
+
+        db.messages
+          .update(messageId, {
+            content: finalContent,
+            timestamp: updatedTimestamp,
+          })
+          .catch((error) =>
+            console.error("[ChatContainer] Failed to update web search message:", error)
+          );
+
+        return {
+          prompt: buildPromptWithSearchContext(prompt, contextBlock),
+        };
+      } catch (error) {
+        console.error("[ChatContainer] Web search failed:", error);
+        const errorMessage = error instanceof Error ? error.message : "Unknown error";
+        const updatedTimestamp = new Date().toISOString();
+        const errorContent = buildWebSearchErrorContent(detection, errorMessage);
+
+        setMessages((prev) =>
+          prev.map((message) =>
+            message.id === messageId
+              ? {
+                  ...message,
+                  content: errorContent,
+                  timestamp: updatedTimestamp,
+                }
+              : message
+          )
+        );
+
+        db.messages
+          .update(messageId, {
+            content: errorContent,
+            timestamp: updatedTimestamp,
+          })
+          .catch((updateError) =>
+            console.error(
+              "[ChatContainer] Failed to persist web search error state:",
+              updateError
+            )
+          );
+
+        return {
+          prompt: buildPromptWithSearchError(prompt, errorMessage),
+        };
+      }
+    },
+    []
+  );
+
   // Process initial message from home page
   useEffect(() => {
     if (
@@ -1524,7 +1706,19 @@ export function ChatContainer({
 
         router.replace(`/chat/${conversationId}`, { scroll: false });
 
-        await sendPromptToAgents(initialMessage, targetAgentIds, historyBeforePrompt, {
+        const detection = detectWebNeed(initialMessage);
+        const shouldRunWebSearch = webSearchEnabled || detection.needsWeb;
+
+        let promptForAgents = initialMessage;
+        const prepared = await runWebSearchFlow({
+          conversationId,
+          prompt: initialMessage,
+          detection,
+          shouldRun: shouldRunWebSearch,
+        });
+        promptForAgents = prepared.prompt;
+
+        await sendPromptToAgents(promptForAgents, targetAgentIds, historyBeforePrompt, {
           showDeliberation,
           onPhaseChange: onDeliberationPhaseChange,
         });
@@ -1547,6 +1741,8 @@ export function ChatContainer({
     selectedAgentIds,
     sendPromptToAgents,
     showDeliberation,
+    runWebSearchFlow,
+    webSearchEnabled,
     waitForConversation,
   ]);
 
@@ -1812,8 +2008,11 @@ export function ChatContainer({
       const now = new Date().toISOString();
 
       const targetAgentIds = [...selectedAgentIds];
+      const detection = detectWebNeed(sanitizedMessage);
+      const shouldRunWebSearch = webSearchEnabled || detection.needsWeb;
       const historyBeforePrompt = buildConversationHistory(messages);
       const isFirstMessage = messages.length === 0;
+      let promptForAgents = sanitizedMessage;
 
       // Add user message to state immediately
       const userMessageId = uuidv4();
@@ -1852,7 +2051,16 @@ export function ChatContainer({
         });
       }
 
-      await sendPromptToAgents(sanitizedMessage, targetAgentIds, historyBeforePrompt, {
+      const prepared = await runWebSearchFlow({
+        conversationId,
+        prompt: sanitizedMessage,
+        detection,
+        shouldRun: shouldRunWebSearch,
+      });
+
+      promptForAgents = prepared.prompt;
+
+      await sendPromptToAgents(promptForAgents, targetAgentIds, historyBeforePrompt, {
         showDeliberation,
         onPhaseChange: onDeliberationPhaseChange,
       });
@@ -2266,6 +2474,15 @@ export function ChatContainer({
                     )}
                   </>
                 )}
+                <div className="flex items-center justify-between gap-3 text-sm">
+                  <span className="font-medium">Force web search</span>
+                  <Switch
+                    checked={webSearchEnabled}
+                    onCheckedChange={setWebSearchEnabled}
+                    disabled={isSending}
+                    aria-label="Force live web search for this conversation"
+                  />
+                </div>
                 <div className="flex items-end gap-2">
                   <TextareaAutosize
                     name="message"
