@@ -92,14 +92,13 @@ import { useGlobalShortcuts } from "@/hooks/use-global-shortcuts";
 import { MessageItem } from "./message-item";
 import { sanitizeInput } from "@/lib/security";
 import { EmptyState } from "./empty-state";
-import { buildSearchQueries, detectWebNeed, formatSearchResults } from "@/lib/web-search";
+import { buildSearchQueries, detectWebNeedSmart, formatSearchResults } from "@/lib/web-search";
 import type { WebSearchDetection, WebSearchResponse } from "@/types/web-search";
 
 const MAX_AGENTS_PER_CONVERSATION = 4;
 const RATE_LIMIT_DELAY_MS = 1500;
 const RATE_LIMIT_PROVIDERS = new Set<AIProvider>(["openrouter", "llm7"]);
 const SHOW_DELIBERATION_STORAGE_KEY = "aegis_show_chain_of_thought";
-const WEB_SEARCH_ENABLED_STORAGE_KEY = "aegis_web_search_enabled";
 const MESSAGE_PAGE_SIZE = 20;
 const SCROLL_TOP_THRESHOLD = 64;
 
@@ -225,7 +224,7 @@ export function ChatContainer({
   initialProjectId,
 }: ChatContainerProps) {
   const router = useRouter();
-  const { agents, createAgent, updateAgent, deleteAgent } = useAgents();
+  const { agents, createAgent, updateAgent, deleteAgent, isLoading: isLoadingAgents } = useAgents();
   const { combinations, saveCombination } = useAgentCombinations();
   const { toast } = useToast();
   const initialSelectedAgentsKey = (initialSelectedAgentIds ?? []).join(",");
@@ -277,13 +276,7 @@ export function ChatContainer({
     const stored = window.localStorage.getItem(SHOW_DELIBERATION_STORAGE_KEY);
     return stored === null ? true : stored === "true";
   });
-  const [webSearchEnabled, setWebSearchEnabled] = useState<boolean>(() => {
-    if (typeof window === "undefined") {
-      return true;
-    }
-    const stored = window.localStorage.getItem(WEB_SEARCH_ENABLED_STORAGE_KEY);
-    return stored === null ? true : stored === "true";
-  });
+  const [webSearchEnabled, setWebSearchEnabled] = useState<boolean>(false);
   const [deliberationStatus, setDeliberationStatus] = useState<{
     stage: MessageStage;
     message: string;
@@ -731,12 +724,6 @@ export function ChatContainer({
       window.localStorage.setItem(SHOW_DELIBERATION_STORAGE_KEY, String(showDeliberation));
     }
   }, [showDeliberation]);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      window.localStorage.setItem(WEB_SEARCH_ENABLED_STORAGE_KEY, String(webSearchEnabled));
-    }
-  }, [webSearchEnabled]);
 
   useEffect(() => {
     if (selectedAgentIds.length > 1 && !initialDeliberationSynced.current) {
@@ -1663,7 +1650,7 @@ export function ChatContainer({
 
         router.replace(`/chat/${conversationId}`, { scroll: false });
 
-        const detection = detectWebNeed(initialMessage);
+        const detection = await detectWebNeedSmart(initialMessage);
         const shouldRunWebSearch = webSearchEnabled || detection.needsWeb;
 
         let promptForAgents = initialMessage;
@@ -1965,7 +1952,7 @@ export function ChatContainer({
       const now = new Date().toISOString();
 
       const targetAgentIds = [...selectedAgentIds];
-      const detection = detectWebNeed(sanitizedMessage);
+      const detection = await detectWebNeedSmart(sanitizedMessage);
       const shouldRunWebSearch = webSearchEnabled || detection.needsWeb;
       const historyBeforePrompt = buildConversationHistory(messages);
       const isFirstMessage = messages.length === 0;
@@ -2357,7 +2344,12 @@ export function ChatContainer({
             )}
             {visibleMessages.length === 0 ? (
               <div className="flex h-full items-center justify-center">
-                {showEmptyState ? (
+                {isLoadingAgents ? (
+                  <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Loading agents...</p>
+                  </div>
+                ) : showEmptyState ? (
                   <EmptyState 
                     onCreateAgent={() => setIsAgentDialogOpen(true)}
                     onOpenSettings={() => setIsSettingsOpen(true)}
@@ -2478,13 +2470,13 @@ export function ChatContainer({
                     )}
                   </>
                 )}
-                <div className="flex items-center justify-between gap-3 text-sm">
-                  <span className="font-medium">Force web search</span>
+                <div className="flex items-center gap-2 text-sm">
+                  <span className="font-medium">Web Search</span>
                   <Switch
                     checked={webSearchEnabled}
                     onCheckedChange={setWebSearchEnabled}
                     disabled={isSending}
-                    aria-label="Force live web search for this conversation"
+                    aria-label="Enable web search for this conversation"
                   />
                 </div>
                 <div className="flex items-end gap-2">
