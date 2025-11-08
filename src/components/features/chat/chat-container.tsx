@@ -102,7 +102,6 @@ const SHOW_DELIBERATION_STORAGE_KEY = "aegis_show_chain_of_thought";
 const WEB_SEARCH_ENABLED_STORAGE_KEY = "aegis_web_search_enabled";
 const MESSAGE_PAGE_SIZE = 20;
 const SCROLL_TOP_THRESHOLD = 64;
-const WEB_SEARCH_PLACEHOLDER_CONTENT = "🔎 Web search enabled. Fetching the latest sources…";
 
 const DELIBERATION_STAGE_MESSAGES: Record<MessageStage, string> = {
   initial: FEATURE_FLAGS.ENABLE_DEBATE_MODE
@@ -148,7 +147,7 @@ const buildWebSearchSuccessContent = (
   detection: WebSearchDetection,
   results: WebSearchResponse
 ): string => {
-  const parts: string[] = ["🔎 **Web Search**"];
+  const parts: string[] = [];
   if (detection.reason) {
     parts.push(`> ${detection.reason}`);
   }
@@ -160,23 +159,10 @@ const buildWebSearchSuccessContent = (
 
   parts.push(
     "",
-    "Review the sources below for the most recent details. Versions and availability may change without notice."
+    "Review the sources above for the most recent details. Versions and availability may change without notice."
   );
 
   return parts.filter(Boolean).join("\n");
-};
-
-const buildWebSearchErrorContent = (
-  detection: WebSearchDetection,
-  errorMessage: string
-): string => {
-  const details = detection.reason ? ` (${detection.reason})` : "";
-  return [
-    "⚠️ **Web Search Temporarily Unavailable**",
-    `Unable to reach the live search service${details}.`,
-    `Technical details: ${errorMessage}`,
-    "The model will respond using internal knowledge and should encourage the user to verify with official sources."
-  ].join("\n\n");
 };
 
 const buildPromptWithSearchContext = (prompt: string, contextBlock: string): string => {
@@ -1531,7 +1517,6 @@ export function ChatContainer({
 
   const runWebSearchFlow = useCallback(
     async ({
-      conversationId: convoId,
       prompt,
       detection,
       shouldRun,
@@ -1540,31 +1525,51 @@ export function ChatContainer({
       prompt: string;
       detection: WebSearchDetection;
       shouldRun: boolean;
-    }): Promise<{ prompt: string }> => {
+    }): Promise<{ 
+      prompt: string;
+      searchData?: {
+        isSearching: boolean;
+        results?: string;
+        error?: string;
+      };
+      executeSearch?: () => Promise<{
+        isSearching: boolean;
+        results?: string;
+        error?: string;
+      }>;
+    }> => {
       if (!shouldRun) {
         return { prompt };
       }
 
-      const messageId = uuidv4();
-      const placeholderTimestamp = new Date().toISOString();
-      const placeholderMessage: Message = {
-        id: messageId,
-        conversationId: convoId,
-        role: "system",
-        content: WEB_SEARCH_PLACEHOLDER_CONTENT,
-        initialContent: WEB_SEARCH_PLACEHOLDER_CONTENT,
-        timestamp: placeholderTimestamp,
-        authorLabel: "Web Search",
+      // Return a function to execute search later, after agent responds
+      const executeSearch = async () => {
+        try {
+          let queries = buildSearchQueries(prompt);
+          if (queries.length === 0) {
+            queries = [prompt];
+          }
+
+          // Execute search
+          const results = await executeWebSearch({ queries, topK: 3 });
+          const formattedResults = buildWebSearchSuccessContent(detection, results);
+
+          return {
+            isSearching: false,
+            results: formattedResults,
+          };
+        } catch (error) {
+          console.error("[ChatContainer] Web search failed:", error);
+          const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+          return {
+            isSearching: false,
+            error: errorMessage,
+          };
+        }
       };
 
-      setMessages((prev) => [...prev, placeholderMessage]);
-
-      try {
-        await db.messages.add(placeholderMessage);
-      } catch (persistError) {
-        console.error("[ChatContainer] Failed to persist web search placeholder:", persistError);
-      }
-
+      // Pre-fetch search context for the prompt
       try {
         let queries = buildSearchQueries(prompt);
         if (queries.length === 0) {
@@ -1574,65 +1579,17 @@ export function ChatContainer({
         const results = await executeWebSearch({ queries, topK: 3 });
         const contextBlock = formatSearchResults(results);
 
-        const finalContent = buildWebSearchSuccessContent(detection, results);
-        const updatedTimestamp = new Date().toISOString();
-
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === messageId
-              ? {
-                  ...message,
-                  content: finalContent,
-                  timestamp: updatedTimestamp,
-                }
-              : message
-          )
-        );
-
-        db.messages
-          .update(messageId, {
-            content: finalContent,
-            timestamp: updatedTimestamp,
-          })
-          .catch((error) =>
-            console.error("[ChatContainer] Failed to update web search message:", error)
-          );
-
         return {
           prompt: buildPromptWithSearchContext(prompt, contextBlock),
+          executeSearch,
         };
       } catch (error) {
-        console.error("[ChatContainer] Web search failed:", error);
+        console.error("[ChatContainer] Web search pre-fetch failed:", error);
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
-        const updatedTimestamp = new Date().toISOString();
-        const errorContent = buildWebSearchErrorContent(detection, errorMessage);
-
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === messageId
-              ? {
-                  ...message,
-                  content: errorContent,
-                  timestamp: updatedTimestamp,
-                }
-              : message
-          )
-        );
-
-        db.messages
-          .update(messageId, {
-            content: errorContent,
-            timestamp: updatedTimestamp,
-          })
-          .catch((updateError) =>
-            console.error(
-              "[ChatContainer] Failed to persist web search error state:",
-              updateError
-            )
-          );
 
         return {
           prompt: buildPromptWithSearchError(prompt, errorMessage),
+          executeSearch,
         };
       }
     },
@@ -2060,10 +2017,57 @@ export function ChatContainer({
 
       promptForAgents = prepared.prompt;
 
+      // Agent responds first (with search context already in prompt)
       await sendPromptToAgents(promptForAgents, targetAgentIds, historyBeforePrompt, {
         showDeliberation,
         onPhaseChange: onDeliberationPhaseChange,
       });
+
+      // After agent finishes, attach search results to the last agent message
+      if (prepared.executeSearch) {
+        try {
+          const searchData = await prepared.executeSearch();
+          
+          // Find the last visible assistant message and attach search results
+          setMessages((prev) => {
+            const lastAgentMsgIndex = prev.findLastIndex(
+              (msg) => msg.role === 'assistant' && !msg.isHidden
+            );
+            if (lastAgentMsgIndex === -1) return prev;
+
+            return prev.map((msg, idx) =>
+              idx === lastAgentMsgIndex
+                ? { ...msg, webSearchData: searchData }
+                : msg
+            );
+          });
+
+          // Also update in database
+          if (conversationId) {
+            // Wait a bit for messages state to update
+            setTimeout(async () => {
+              try {
+                const allMessages = await db.messages
+                  .where('conversationId')
+                  .equals(conversationId)
+                  .and((msg) => msg.role === 'assistant' && !msg.isHidden)
+                  .reverse()
+                  .limit(1)
+                  .toArray();
+
+                const lastAgentMsg = allMessages[0];
+                if (lastAgentMsg?.id) {
+                  await db.messages.update(lastAgentMsg.id, { webSearchData: searchData });
+                }
+              } catch (error) {
+                console.error('[ChatContainer] Failed to update message with search data:', error);
+              }
+            }, 500);
+          }
+        } catch (error) {
+          console.error('[ChatContainer] Search execution failed:', error);
+        }
+      }
     } catch (error) {
       console.error("[ChatContainer] Error sending message:", error);
       toast({

@@ -11,7 +11,7 @@ server:
   port: 8080
   bind_address: "0.0.0.0"
   secret_key: ${SEARXNG_SECRET_KEY:-change-me}
-  public_instance: true
+  public_instance: false
   limiter: false
   trusted_networks:
     - "127.0.0.0/8"
@@ -19,31 +19,16 @@ server:
     - "172.16.0.0/12"
     - "192.168.0.0/16"
     - "100.64.0.0/10"
-  base_url: "http://localhost:8080/"
-  image_proxy: true
+  base_url: "${SEARXNG_BASE_URL:-http://localhost:8080/}"
+  image_proxy: false
 
 search:
   safe_search: 0
   default_lang: "en"
   default_category: "general"
   autocomplete: "duckduckgo"
+  formats:
+    - html
+    - json
   max_search_time: 5.0
 
-ui:
-  center_alignment: false
-  default_locale: "en"
-  server_url: "http://localhost:8080/"
-
-engines:
-  - name: "google"
-    disabled: false
-  - name: "duckduckgo"
-    disabled: false
-  - name: "bing"
-    disabled: false
-
-outgoing:
-  request_timeout: 5.0
-  max_request_timeout: 10.0
-  pool_connections: 100
-  pool_maxsize: 20

@@ -22,13 +22,20 @@ import type {
 import { callAIModel } from '../api/ai-client';
 import { getAgentById } from '../storage/agent-storage';
 import { getAPIKeyById } from '../storage/api-key-storage';
+import { buildRuntimeDateDirective, formatHumanDate } from '@/lib/time-utils';
 
-export function composeSystemPrompt(agent: Agent): string {
+export function composeSystemPrompt(agent: Agent, options?: { currentDate?: Date }): string {
   const nameReminder = `You are known as ${agent.name}. I will call you ${agent.name}.`;
   const persona = agent.persona?.trim();
-  return persona ? `${persona}
+  const runtimeDate = options?.currentDate ?? new Date();
+  const directive = buildRuntimeDateDirective(runtimeDate);
+  const basePrompt = persona ? `${persona}
 
 ${nameReminder}` : nameReminder;
+
+  return `${basePrompt}
+
+${directive}`;
 }
 
 /**
@@ -40,6 +47,7 @@ export async function orchestrateAgents(
 ): Promise<OrchestrationResult> {
   console.log('[Orchestration] Starting with config:', config);
   const startTime = Date.now();
+  const runtimeDate = new Date();
 
   // Load agents
   const agents = await Promise.all(
@@ -60,7 +68,7 @@ export async function orchestrateAgents(
       throw new Error('Agent not found');
     }
     
-    const result = await singleAgentFlow(singleAgent, config.userPrompt);
+    const result = await singleAgentFlow(singleAgent, config.userPrompt, runtimeDate);
     return {
       ...result,
       metadata: {
@@ -72,7 +80,7 @@ export async function orchestrateAgents(
   }
 
   // Multi-agent: full orchestration
-  const result = await multiAgentFlow(validAgents, config);
+  const result = await multiAgentFlow(validAgents, config, runtimeDate);
   return {
     ...result,
     metadata: {
@@ -88,7 +96,8 @@ export async function orchestrateAgents(
  */
 async function singleAgentFlow(
   agent: Agent,
-  userPrompt: string
+  userPrompt: string,
+  runtimeDate: Date
 ): Promise<Omit<OrchestrationResult, 'metadata'>> {
   console.log(`[Orchestration] Single agent flow for ${agent.name}`);
 
@@ -98,7 +107,7 @@ async function singleAgentFlow(
       agent,
       {
         prompt: userPrompt,
-        systemPrompt: composeSystemPrompt(agent),
+        systemPrompt: composeSystemPrompt(agent, { currentDate: runtimeDate }),
       },
       apiKey
     );
@@ -124,19 +133,20 @@ async function singleAgentFlow(
  */
 async function multiAgentFlow(
   agents: Agent[],
-  config: OrchestrationConfig
+  config: OrchestrationConfig,
+  runtimeDate: Date
 ): Promise<Omit<OrchestrationResult, 'metadata'>> {
   console.log(`[Orchestration] Multi-agent flow with ${agents.length} agents`);
 
   // Phase 1: Initial Responses
   console.log('[Orchestration] Phase 1: Getting initial responses...');
-  const initialResponses = await getInitialResponses(agents, config.userPrompt);
+  const initialResponses = await getInitialResponses(agents, config.userPrompt, runtimeDate);
 
   // Phase 2: Refinement (optional, default true)
   let refinedResponses: RefinedResponse[];
   if (config.enableRefinement !== false) {
     console.log('[Orchestration] Phase 2: Refining responses...');
-    refinedResponses = await refineResponses(agents, config.userPrompt, initialResponses);
+    refinedResponses = await refineResponses(agents, config.userPrompt, initialResponses, runtimeDate);
   } else {
     console.log('[Orchestration] Skipping refinement phase');
     refinedResponses = initialResponses.map(r => ({
@@ -150,7 +160,8 @@ async function multiAgentFlow(
   const finalResponse = await aggregateResponses(
     config.userPrompt,
     refinedResponses,
-    config.synthesisPrompt
+    config.synthesisPrompt,
+    runtimeDate
   );
 
   return {
@@ -166,7 +177,8 @@ async function multiAgentFlow(
  */
 async function getInitialResponses(
   agents: Agent[],
-  userPrompt: string
+  userPrompt: string,
+  runtimeDate: Date
 ): Promise<AgentResponse[]> {
   const responses = await Promise.all(
     agents.map(async (agent) => {
@@ -179,7 +191,7 @@ async function getInitialResponses(
           agent,
           {
             prompt: userPrompt,
-            systemPrompt: composeSystemPrompt(agent),
+            systemPrompt: composeSystemPrompt(agent, { currentDate: runtimeDate }),
           },
           apiKey
         );
@@ -213,7 +225,8 @@ async function getInitialResponses(
 async function refineResponses(
   agents: Agent[],
   userPrompt: string,
-  initialResponses: AgentResponse[]
+  initialResponses: AgentResponse[],
+  runtimeDate: Date
 ): Promise<RefinedResponse[]> {
   const refinedResponses: RefinedResponse[] = [];
   const latestResponses = new Map<string, AgentResponse>(
@@ -264,7 +277,7 @@ async function refineResponses(
         agent,
         {
           prompt: refinementPrompt,
-          systemPrompt: composeSystemPrompt(agent),
+          systemPrompt: composeSystemPrompt(agent, { currentDate: runtimeDate }),
         },
         apiKey
       );
@@ -308,7 +321,8 @@ async function refineResponses(
 async function aggregateResponses(
   userPrompt: string,
   refinedResponses: RefinedResponse[],
-  customSynthesisPrompt?: string
+  customSynthesisPrompt: string | undefined,
+  runtimeDate: Date
 ): Promise<string> {
   console.log('[Orchestration] Aggregating responses...');
 
@@ -320,7 +334,8 @@ async function aggregateResponses(
   const aggregationPrompt = buildAggregationPrompt(
     userPrompt,
     refinedResponses,
-    customSynthesisPrompt
+    customSynthesisPrompt,
+    { currentDate: runtimeDate }
   );
 
   // Use first agent as aggregator
@@ -338,11 +353,15 @@ async function aggregateResponses(
   const apiKey = firstAgent.apiKeyId ? await getAPIKey(firstAgent.apiKeyId) : undefined;
 
   try {
+    const systemPromptOverride =
+      firstAgent.persona ||
+      'You are a neutral synthesis expert. Resolve disagreements, preserve the strongest evidence, and present a confident, user-facing answer in natural language without mentioning the deliberation process or the individual agents.';
+
     const response = await callAIModel(
       firstAgent,
       {
         prompt: aggregationPrompt,
-  systemPrompt: 'You are a neutral synthesis expert. Resolve disagreements, preserve the strongest evidence, and present a confident, user-facing answer in natural language without mentioning the deliberation process or the individual agents.',
+        systemPrompt: `${systemPromptOverride.trim()}\n\n${buildRuntimeDateDirective(runtimeDate)}`,
       },
       apiKey
     );
@@ -389,10 +408,17 @@ Preserve your own voice while acknowledging where another agent has a better arg
 export function buildAggregationPrompt(
   userPrompt: string,
   refinedResponses: RefinedResponse[],
-  customPrompt?: string
+  customPrompt?: string,
+  options?: { currentDate?: Date }
 ): string {
-  const defaultPrompt = customPrompt || 
+  const defaultPrompt =
+    customPrompt ||
     'Develop a single, trustworthy answer that resolves disagreements, highlights the most useful reasoning, and communicates next steps in clear, natural language. Do not reference the agents or the debate explicitly—deliver the result as if you are the expert speaking directly to the user.';
+
+  const runtimeDate = options?.currentDate ?? new Date();
+  const runtimeLine = `Current runtime date: ${formatHumanDate(runtimeDate)} (${runtimeDate.toISOString()})`;
+  const temporalInstructions =
+    'Interpret any relative time expressions in the agent responses using this runtime date. When summarizing, cite explicit dates from sources whenever possible.';
 
   return `Original User Question:
 ${userPrompt}
@@ -404,6 +430,9 @@ ${refinedResponses.map(r => `**${r.agentName}:**\n${r.content}`).join('\n\n')}
 
 ${defaultPrompt}
 
+${runtimeLine}
+${temporalInstructions}
+
 Provide a clear, well-structured final answer:`;
 }
 
@@ -414,3 +443,4 @@ async function getAPIKey(apiKeyId: string): Promise<string | undefined> {
   const key = await getAPIKeyById(apiKeyId);
   return key?.key;
 }
+

@@ -108,6 +108,11 @@ export interface Message {
   initialContent?: string;
   authorLabel?: string;
   isHidden?: boolean;
+  webSearchData?: {
+    isSearching: boolean;
+    results?: string; // Formatted search results
+    error?: string;
+  };
 }
 
 /**

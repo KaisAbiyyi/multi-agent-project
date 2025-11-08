@@ -121,6 +121,10 @@ export function formatSearchResults(results: WebSearchResponse): string {
 
   const lines: string[] = ["Web search results:"];
 
+  if (results.capturedAt) {
+    lines.push(`Captured at: ${results.capturedAt}`);
+  }
+
   results.results.forEach((result) => {
     lines.push(buildResultBlock(result));
   });
@@ -147,9 +151,17 @@ function buildResultBlock(result: WebSearchQueryResult): string {
     if (item.source) {
       snippetPieces.push(`Source: ${item.source}`);
     }
-    if (item.publishedAt) {
-      snippetPieces.push(`Published: ${item.publishedAt}`);
+    const publishedTokens: string[] = [];
+    if (item.publishedDisplay) {
+      publishedTokens.push(item.publishedDisplay);
     }
+    if (item.publishedAt) {
+      publishedTokens.push(item.publishedAt);
+    }
+    if (publishedTokens.length > 0) {
+      snippetPieces.push(`Published: ${publishedTokens.join(" | ")}`);
+    }
+
     blockLines.push(
       `${rank}. ${item.title}\n   URL: ${item.url}\n   ${snippetPieces.filter(Boolean).join(" | ")}`
     );

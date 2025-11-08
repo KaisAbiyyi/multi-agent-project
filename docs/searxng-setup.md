@@ -41,6 +41,9 @@ SEARCH_PROVIDER_BASE_URL=http://localhost:8080
 # Optional: point SEARCH_PROVIDER_FALLBACK_BASE_URL to a public SearxNG instance for local dev
 ```
 
+If another process already uses port `8080`, set `SEARXNG_HOST_PORT` in your project `.env` (or export it before running Compose) to any free port, then rerun `docker compose up -d`.
+Remember to update `SEARCH_PROVIDER_BASE_URL` to match the host port you choose.
+
 Restart the Next.js dev server after changing env vars.
 
 ---

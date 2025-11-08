@@ -18,8 +18,9 @@ import {
 } from "@/components/ui/select";
 import { APIKeyManagement } from "./api-key-management";
 import { AggregatorConfiguration } from "./aggregator-configuration";
+import { SearchSettings } from "./search-settings";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Key, Bot, Palette } from "lucide-react";
+import { Key, Bot, Palette, Search } from "lucide-react";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -40,10 +41,14 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogHeader>
 
         <Tabs defaultValue="aggregator" className="flex-1 flex flex-col overflow-hidden">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="aggregator" className="flex items-center gap-2">
               <Bot className="h-4 w-4" />
               Aggregator
+            </TabsTrigger>
+            <TabsTrigger value="search" className="flex items-center gap-2">
+              <Search className="h-4 w-4" />
+              Search
             </TabsTrigger>
             <TabsTrigger value="api-keys" className="flex items-center gap-2">
               <Key className="h-4 w-4" />
@@ -58,6 +63,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
           <div className="flex-1 overflow-y-auto mt-6">
             <TabsContent value="aggregator" className="mt-0 space-y-4">
               <AggregatorConfiguration />
+            </TabsContent>
+
+            <TabsContent value="search" className="mt-0 space-y-4">
+              <SearchSettings />
             </TabsContent>
 
             <TabsContent value="api-keys" className="mt-0 space-y-4">

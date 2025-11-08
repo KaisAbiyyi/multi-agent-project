@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Bot, User, Copy, Check } from 'lucide-react';
+import { Bot, User, Copy, Check, Search } from 'lucide-react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { MarkdownRenderer } from '@/components/shared/markdown-renderer';
 import { Badge } from '@/components/ui/badge';
@@ -116,6 +116,31 @@ export const MessageItem = memo(function MessageItem({ message, agentName }: Mes
               </div>
             )}
           </div>
+
+          {/* Web Search Results Section */}
+          {message.webSearchData && (
+            <div className="mt-4 rounded-lg border border-border/50 bg-muted/30 p-3">
+              <div className="mb-2 flex items-center gap-2">
+                <Search className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Web Search</span>
+              </div>
+              
+              {message.webSearchData.isSearching ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <span className="animate-pulse">Fetching the latest sources...</span>
+                </div>
+              ) : message.webSearchData.error ? (
+                <div className="text-sm text-destructive">
+                  <p className="font-medium">Search temporarily unavailable</p>
+                  <p className="mt-1 text-xs opacity-80">{message.webSearchData.error}</p>
+                </div>
+              ) : message.webSearchData.results ? (
+                <div className="prose prose-sm dark:prose-invert max-w-none text-sm">
+                  <MarkdownRenderer content={message.webSearchData.results} />
+                </div>
+              ) : null}
+            </div>
+          )}
 
           <div className="mt-2 text-xs opacity-70">
             {new Date(message.timestamp).toLocaleTimeString([], {

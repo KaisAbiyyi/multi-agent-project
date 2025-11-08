@@ -3,9 +3,10 @@ services:
     image: searxng/searxng:latest
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "${SEARXNG_HOST_PORT:-8080}:8080"
     environment:
-      - SEARXNG_BASE_URL=http://localhost:8080/
+      - SEARXNG_HOST_PORT=${SEARXNG_HOST_PORT:-8080}
+      - SEARXNG_BASE_URL=http://localhost:${SEARXNG_HOST_PORT:-8080}/
       - SEARXNG_SECRET_KEY=local-dev-key
       - SEARXNG_INSTANCE_NAME=Aegis Research Proxy
       - SEARXNG_AUTOCOMPLETE=none
@@ -13,7 +14,7 @@ services:
     volumes:
       - ./ops/searxng/settings.yml:/etc/searxng/settings.yml:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO", "-", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/"]
       interval: 30s
       timeout: 5s
       retries: 5
